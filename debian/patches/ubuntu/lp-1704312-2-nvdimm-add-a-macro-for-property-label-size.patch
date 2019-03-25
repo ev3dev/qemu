@@ -1,0 +1,45 @@
+From da6789c27c2ea71765cfab04bad9a42b5426f0bd Mon Sep 17 00:00:00 2001
+From: Haozhong Zhang <haozhong.zhang@intel.com>
+Date: Mon, 11 Dec 2017 15:28:05 +0800
+Subject: [PATCH 2/3] nvdimm: add a macro for property "label-size"
+
+Signed-off-by: Haozhong Zhang <haozhong.zhang@intel.com>
+Reviewed-by: Stefan Hajnoczi <stefanha@redhat.com>
+Message-Id: <20171211072806.2812-3-haozhong.zhang@intel.com>
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Eduardo Habkost <ehabkost@redhat.com>
+---
+ hw/mem/nvdimm.c         | 2 +-
+ include/hw/mem/nvdimm.h | 3 +++
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/hw/mem/nvdimm.c b/hw/mem/nvdimm.c
+index 952fce5..618c3d6 100644
+--- a/hw/mem/nvdimm.c
++++ b/hw/mem/nvdimm.c
+@@ -66,7 +66,7 @@ out:
+ 
+ static void nvdimm_init(Object *obj)
+ {
+-    object_property_add(obj, "label-size", "int",
++    object_property_add(obj, NVDIMM_LABLE_SIZE_PROP, "int",
+                         nvdimm_get_label_size, nvdimm_set_label_size, NULL,
+                         NULL, NULL);
+ }
+diff --git a/include/hw/mem/nvdimm.h b/include/hw/mem/nvdimm.h
+index 03e1ff9..28e68dd 100644
+--- a/include/hw/mem/nvdimm.h
++++ b/include/hw/mem/nvdimm.h
+@@ -47,6 +47,9 @@
+ #define NVDIMM_CLASS(oc) OBJECT_CLASS_CHECK(NVDIMMClass, (oc), TYPE_NVDIMM)
+ #define NVDIMM_GET_CLASS(obj) OBJECT_GET_CLASS(NVDIMMClass, (obj), \
+                                                TYPE_NVDIMM)
++
++#define NVDIMM_LABLE_SIZE_PROP "label-size"
++
+ struct NVDIMMDevice {
+     /* private */
+     PCDIMMDevice parent_obj;
+-- 
+2.7.4
+

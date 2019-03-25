@@ -1,0 +1,40 @@
+From 490cf5e8ad81efa02b448c2e1b75748ddd080380 Mon Sep 17 00:00:00 2001
+From: Laurent Vivier <lvivier@redhat.com>
+Date: Fri, 9 Feb 2018 09:18:58 +0100
+Subject: [PATCH 3/9] spapr: set vsmt to MAX(8, smp_threads)
+
+We ignore silently the value of smp_threads when we set
+the default VSMT value, and if smp_threads is greater than VSMT
+kernel is going into trouble later.
+
+Fixes: 8904e5a750
+("spapr: Adjust default VSMT value for better migration compatibility")
+
+Signed-off-by: Laurent Vivier <lvivier@redhat.com>
+Reviewed-by: Greg Kurz <groug@kaod.org>
+Signed-off-by: David Gibson <david@gibson.dropbear.id.au>
+
+Forwarded: no (backport)
+Origin: upstream, https://git.qemu.org/?p=qemu.git;a=commit;h=4ad64cbd
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1763468
+Last-Update: 2018-04-13
+---
+ hw/ppc/spapr.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/hw/ppc/spapr.c b/hw/ppc/spapr.c
+index 094dc7c..b4d0d5d 100644
+--- a/hw/ppc/spapr.c
++++ b/hw/ppc/spapr.c
+@@ -2312,7 +2312,7 @@ static void spapr_set_vsmt_mode(sPAPRMachineState *spapr, Error **errp)
+          * the value that we'd get with KVM on POWER8, the
+          * overwhelmingly common case in production systems.
+          */
+-        spapr->vsmt = 8;
++        spapr->vsmt = MAX(8, smp_threads);
+     }
+ 
+     /* KVM: If necessary, set the SMT mode: */
+-- 
+2.7.4
+

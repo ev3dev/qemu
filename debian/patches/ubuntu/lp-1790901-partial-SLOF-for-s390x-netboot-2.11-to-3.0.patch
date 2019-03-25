@@ -1,0 +1,1462 @@
+From 7efa6be0241cfac399458ebc1cd9d09f33e56afd Mon Sep 17 00:00:00 2001
+From: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+Date: Tue, 25 Sep 2018 12:04:55 +0200
+Subject: [PATCH] SLOF: update bits for s390x Image build from qemu 2.11 to
+ qemu 3.0
+
+This is the Delta of the following paths from qemu 2.11 to qemu 3.0
+Archive 1: https://download.qemu.org/qemu-2.11.0.tar.xz
+Archive 2: https://download.qemu.org/qemu-3.0.0.tar.xz
+
+Paths:
+ lib/libc/ctype/*
+ lib/libc/string/*
+ lib/libc/stdlib/*
+ lib/libc/include/*
+ lib/libc/stdio/*
+ lib/libnet/*
+ LICENSE
+ slof/sbrk.c
+
+Signed-off-by: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+
+Forwarded: not-needed
+Author: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+Origin: https://download.qemu.org/qemu-3.0.0.tar.xz
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1790901
+Last-Update: 2019-09-25
+
+---
+ roms/SLOF/lib/libc/include/assert.h    |  36 ++++
+ roms/SLOF/lib/libc/include/stdio.h     |   1 +
+ roms/SLOF/lib/libc/stdio/Makefile.inc  |   2 +-
+ roms/SLOF/lib/libc/stdio/snprintf.c    |  28 +++
+ roms/SLOF/lib/libc/stdlib/free.c       |   4 +-
+ roms/SLOF/lib/libc/string/Makefile.inc |   2 +-
+ roms/SLOF/lib/libc/string/strrchr.c    |  28 +++
+ roms/SLOF/lib/libnet/Makefile          |   2 +-
+ roms/SLOF/lib/libnet/bootp.c           |   2 +-
+ roms/SLOF/lib/libnet/dhcp.c            |  76 ++++++--
+ roms/SLOF/lib/libnet/dhcpv6.c          |   3 +-
+ roms/SLOF/lib/libnet/ipv6.c            |   2 +-
+ roms/SLOF/lib/libnet/libnet.code       |   6 +-
+ roms/SLOF/lib/libnet/netapps.h         |   3 +-
+ roms/SLOF/lib/libnet/netload.c         | 252 ++++++++++++++++---------
+ roms/SLOF/lib/libnet/ping.c            |  14 +-
+ roms/SLOF/lib/libnet/pxelinux.c        | 251 ++++++++++++++++++++++++
+ roms/SLOF/lib/libnet/pxelinux.h        |  33 ++++
+ roms/SLOF/lib/libnet/tftp.c            | 132 +++++++++++--
+ roms/SLOF/lib/libnet/tftp.h            |  16 +-
+ 20 files changed, 735 insertions(+), 158 deletions(-)
+ create mode 100644 roms/SLOF/lib/libc/include/assert.h
+ create mode 100644 roms/SLOF/lib/libc/stdio/snprintf.c
+ create mode 100644 roms/SLOF/lib/libc/string/strrchr.c
+ create mode 100644 roms/SLOF/lib/libnet/pxelinux.c
+ create mode 100644 roms/SLOF/lib/libnet/pxelinux.h
+
+diff --git a/roms/SLOF/lib/libc/include/assert.h b/roms/SLOF/lib/libc/include/assert.h
+new file mode 100644
+index 0000000..01434da
+--- /dev/null
++++ b/roms/SLOF/lib/libc/include/assert.h
+@@ -0,0 +1,36 @@
++/*****************************************************************************
++ * assert() macro definition
++ *
++ * Copyright 2018 Red Hat, Inc.
++ *
++ * This program and the accompanying materials are made available under
++ * the terms of the BSD License which accompanies this distribution, and
++ * is available at http://www.opensource.org/licenses/bsd-license.php
++ *
++ * Contributors:
++ *     Thomas Huth, Red Hat Inc. - initial implementation
++ *****************************************************************************/
++
++#ifndef SLIMLINE_ASSERT_H
++#define SLIMLINE_ASSERT_H
++
++#ifdef NDEBUG
++
++#define assert(cond) (void)
++
++#else
++
++#define assert(cond) \
++	do { \
++		if (!(cond)) { \
++			fprintf(stderr, \
++				"ERROR: Assertion '" #cond "' failed!\n" \
++				"(function %s, file " __FILE__ ", line %i)\n", \
++				__func__, __LINE__); \
++			while (1) {} \
++		} \
++	}  while (0)
++
++#endif
++
++#endif /* SLIMLINE_ASSERT_H */
+diff --git a/roms/SLOF/lib/libc/include/stdio.h b/roms/SLOF/lib/libc/include/stdio.h
+index c54528f..1cd5faf 100644
+--- a/roms/SLOF/lib/libc/include/stdio.h
++++ b/roms/SLOF/lib/libc/include/stdio.h
+@@ -43,6 +43,7 @@ int fileno(FILE *stream);
+ int printf(const char *format, ...) __attribute__((format (printf, 1, 2)));
+ int fprintf(FILE *stream, const char *format, ...) __attribute__((format (printf, 2, 3)));
+ int sprintf(char *str, const char *format, ...)  __attribute__((format (printf, 2, 3)));
++int snprintf(char *str, size_t size, const char *format, ...)  __attribute__((format (printf, 3, 4)));
+ int vfprintf(FILE *stream, const char *format, va_list);
+ int vsprintf(char *str, const char *format, va_list);
+ int vsnprintf(char *str, size_t size, const char *format, va_list);
+diff --git a/roms/SLOF/lib/libc/stdio/Makefile.inc b/roms/SLOF/lib/libc/stdio/Makefile.inc
+index ac5302d..6688317 100644
+--- a/roms/SLOF/lib/libc/stdio/Makefile.inc
++++ b/roms/SLOF/lib/libc/stdio/Makefile.inc
+@@ -13,7 +13,7 @@
+ 
+ STDIO_SRC_C = fscanf.c sprintf.c vfprintf.c vsnprintf.c vsprintf.c fprintf.c \
+ 	      printf.c setvbuf.c putc.c puts.c putchar.c scanf.c stdchnls.c \
+-	      vfscanf.c vsscanf.c fileno.c
++	      vfscanf.c vsscanf.c fileno.c snprintf.c
+ 
+ STDIO_SRC_ASM = 
+ STDIO_SRCS = $(STDIO_SRC_C:%=$(STDIOCMNDIR)/%) $(STDIO_SRC_ASM:%=$(STDIOCMNDIR)/%)
+diff --git a/roms/SLOF/lib/libc/stdio/snprintf.c b/roms/SLOF/lib/libc/stdio/snprintf.c
+new file mode 100644
+index 0000000..e3cfa6e
+--- /dev/null
++++ b/roms/SLOF/lib/libc/stdio/snprintf.c
+@@ -0,0 +1,28 @@
++/******************************************************************************
++ * Copyright (c) 2004, 2008 IBM Corporation
++ * All rights reserved.
++ * This program and the accompanying materials
++ * are made available under the terms of the BSD License
++ * which accompanies this distribution, and is available at
++ * http://www.opensource.org/licenses/bsd-license.php
++ *
++ * Contributors:
++ *     IBM Corporation - initial implementation
++ *****************************************************************************/
++
++#include <stdio.h>
++
++int snprintf(char *buff, size_t size, const char *format, ...)
++{
++	va_list ar;
++	int count;
++
++	if (!buff || !format)
++		return -1;
++
++	va_start(ar, format);
++	count = vsnprintf(buff, size, format, ar);
++	va_end(ar);
++
++	return count;
++}
+diff --git a/roms/SLOF/lib/libc/stdlib/free.c b/roms/SLOF/lib/libc/stdlib/free.c
+index 9005450..d276585 100644
+--- a/roms/SLOF/lib/libc/stdlib/free.c
++++ b/roms/SLOF/lib/libc/stdlib/free.c
+@@ -19,8 +19,10 @@ free(void *ptr)
+ {
+ 	struct chunk *header;
+ 
++	if (!ptr)
++		return;
++
+ 	header = (struct chunk *) ptr;
+ 	header--;
+ 	header->inuse = 0;
+-
+ }
+diff --git a/roms/SLOF/lib/libc/string/Makefile.inc b/roms/SLOF/lib/libc/string/Makefile.inc
+index 7ccf3c4..0a77738 100644
+--- a/roms/SLOF/lib/libc/string/Makefile.inc
++++ b/roms/SLOF/lib/libc/string/Makefile.inc
+@@ -13,7 +13,7 @@
+ 
+ STRING_SRC_C = strcat.c strchr.c strcmp.c strcpy.c strlen.c strncmp.c \
+ 		strncpy.c strstr.c memset.c memcpy.c memmove.c memchr.c \
+-		memcmp.c strcasecmp.c strncasecmp.c strtok.c
++		memcmp.c strcasecmp.c strncasecmp.c strtok.c strrchr.c
+ STRING_SRC_ASM = 
+ STRING_SRCS = $(STRING_SRC_C:%=$(STRINGCMNDIR)/%) $(STRING_SRC_ASM:%=$(STRINGCMNDIR)/%)
+ STRING_OBJS = $(STRING_SRC_C:%.c=%.o) $(STRING_SRC_ASM:%.S=%.o)
+diff --git a/roms/SLOF/lib/libc/string/strrchr.c b/roms/SLOF/lib/libc/string/strrchr.c
+new file mode 100644
+index 0000000..ccfaa9f
+--- /dev/null
++++ b/roms/SLOF/lib/libc/string/strrchr.c
+@@ -0,0 +1,28 @@
++/******************************************************************************
++ * libc strrchr() implementation
++ *
++ * This program and the accompanying materials are made available under
++ * the terms of the BSD License which accompanies this distribution, and
++ * is available at http://www.opensource.org/licenses/bsd-license.php
++ *
++ * Contributors:
++ *     Thomas Huth - initial implementation
++ *****************************************************************************/
++
++#include <string.h>
++
++char *
++strrchr(const char *s, int c)
++{
++	char cb = c;
++	char *ptr = (char *)s + strlen(s) - 1;
++
++	while (ptr >= s) {
++		if (*ptr == cb) {
++			return ptr;
++		}
++		--ptr;
++	}
++
++	return NULL;
++}
+diff --git a/roms/SLOF/lib/libnet/Makefile b/roms/SLOF/lib/libnet/Makefile
+index dfefea9..a2a6570 100644
+--- a/roms/SLOF/lib/libnet/Makefile
++++ b/roms/SLOF/lib/libnet/Makefile
+@@ -19,7 +19,7 @@ include $(TOP)/make.rules
+ CFLAGS += -I. -I.. -I../libc/include -I$(TOP)/include $(FLAG)
+ 
+ SRCS =	ethernet.c ipv4.c udp.c tcp.c dns.c bootp.c dhcp.c tftp.c \
+-	ipv6.c dhcpv6.c icmpv6.c ndp.c netload.c ping.c args.c
++	ipv6.c dhcpv6.c icmpv6.c ndp.c netload.c ping.c args.c pxelinux.c
+ 
+ OBJS = $(SRCS:%.c=%.o)
+ 
+diff --git a/roms/SLOF/lib/libnet/bootp.c b/roms/SLOF/lib/libnet/bootp.c
+index 6d58cef..464cb66 100644
+--- a/roms/SLOF/lib/libnet/bootp.c
++++ b/roms/SLOF/lib/libnet/bootp.c
+@@ -166,7 +166,7 @@ receive_bootp(filename_ip_t * fn_ip)
+ 
+ 		fn_ip->own_ip = btph->yiaddr;
+ 		fn_ip->server_ip = btph->siaddr;
+-		strcpy((char *) fn_ip->filename, (char *) btph->file);
++		strcpy(fn_ip->filename, (char *)btph->file);
+ 
+ #if DEBUG
+ 		printf("\nThese are the details of the bootp reply:\n");
+diff --git a/roms/SLOF/lib/libnet/dhcp.c b/roms/SLOF/lib/libnet/dhcp.c
+index 0cb4fa4..85cd7c0 100644
+--- a/roms/SLOF/lib/libnet/dhcp.c
++++ b/roms/SLOF/lib/libnet/dhcp.c
+@@ -79,6 +79,8 @@
+ #define DHCP_TFTP_SERVER      66
+ #define DHCP_BOOTFILE         67
+ #define DHCP_CLIENT_ARCH      93
++#define DHCP_PXELINUX_CFGFILE 209   /* See RFC 5071 */
++#define DHCP_PXELINUX_PREFIX  210
+ #define DHCP_ENDOPT         0xFF
+ #define DHCP_PADOPT         0x00
+ 
+@@ -124,8 +126,8 @@ typedef struct {
+ 	uint32_t   subnet_mask;       /**< o. 1 Subnet mask                    */
+ 	uint8_t    msg_type;          /**< o.53 DHCP-message type              */
+ 	uint8_t    overload;          /**< o.52 Overload sname/file fields     */
+-	int8_t     tftp_server[256];  /**< o.66 TFTP server name               */
+-	int8_t     bootfile[256];     /**< o.67 Boot file name                 */
++	char       tftp_server[256];  /**< o.66 TFTP server name               */
++	char       bootfile[256];     /**< o.67 Boot file name                 */
+ 	uint16_t   client_arch;       /**< o.93 Client architecture type       */
+ } dhcp_options_t;
+ 
+@@ -167,6 +169,8 @@ static uint32_t dhcp_siaddr_ip     = 0;
+ static char   dhcp_filename[256];
+ static char   dhcp_tftp_name[256];
+ static uint32_t dhcp_xid;
++static char *pxelinux_cfgfile;
++static char *pxelinux_prefix;
+ 
+ static char   * response_buffer;
+ 
+@@ -185,6 +189,8 @@ int32_t dhcpv4(char *ret_buffer, filename_ip_t *fn_ip)
+ 	strcpy(dhcp_filename, "");
+ 	strcpy(dhcp_tftp_name, "");
+ 
++	pxelinux_cfgfile = pxelinux_prefix = NULL;
++
+ 	response_buffer = ret_buffer;
+ 
+ 	if (dhcp_attempt(fd) == 0)
+@@ -197,7 +203,7 @@ int32_t dhcpv4(char *ret_buffer, filename_ip_t *fn_ip)
+ 		dhcp_siaddr_ip = fn_ip->server_ip;
+ 	}
+ 	if(fn_ip->filename[0] != 0) {
+-		strcpy(dhcp_filename, (char *) fn_ip->filename);
++		strcpy(dhcp_filename, fn_ip->filename);
+ 	}
+ 
+ 	// TFTP SERVER
+@@ -230,7 +236,11 @@ int32_t dhcpv4(char *ret_buffer, filename_ip_t *fn_ip)
+ 	// Store configuration info into filename_ip strucutre
+ 	fn_ip -> own_ip = dhcp_own_ip;
+ 	fn_ip -> server_ip = dhcp_tftp_ip;
+-	strcpy((char *) fn_ip -> filename, dhcp_filename);
++	strcpy(fn_ip->filename, dhcp_filename);
++
++	fn_ip->pl_cfgfile = pxelinux_cfgfile;
++	fn_ip->pl_prefix = pxelinux_prefix;
++	pxelinux_cfgfile = pxelinux_prefix = NULL;
+ 
+ 	return 0;
+ }
+@@ -342,14 +352,14 @@ static int32_t dhcp_encode_options(uint8_t * opt_field, dhcp_options_t * opt_str
+ 
+ 	if (opt_struct -> flag[DHCP_TFTP_SERVER]) {
+ 		options[0] = DHCP_TFTP_SERVER;
+-		options[1] = strlen((char *) opt_struct -> tftp_server) + 1;
++		options[1] = strlen(opt_struct->tftp_server) + 1;
+ 		memcpy(options + 2, opt_struct -> tftp_server, options[1]);
+ 		options += options[1] + 2;
+ 	}
+ 
+ 	if (opt_struct -> flag[DHCP_BOOTFILE]) {
+ 		options[0] = DHCP_BOOTFILE;
+-		options[1] = strlen((char *) opt_struct -> bootfile) + 1;
++		options[1] = strlen(opt_struct->bootfile) + 1;
+ 		memcpy(options + 2, opt_struct -> bootfile, options[1]);
+ 		options += options[1] + 2;
+ 	}
+@@ -456,6 +466,26 @@ static int32_t dhcp_decode_options(uint8_t opt_field[], uint32_t opt_len,
+ 			offset += 4;
+ 			break;
+ 
++		case DHCP_PXELINUX_CFGFILE:
++			pxelinux_cfgfile = malloc(opt_field[offset + 1] + 1);
++			if (pxelinux_cfgfile) {
++				memcpy(pxelinux_cfgfile, opt_field + offset + 2,
++				       opt_field[offset + 1]);
++				pxelinux_cfgfile[opt_field[offset + 1]] = 0;
++			}
++			offset += 2 + opt_field[offset + 1];
++			break;
++
++		case DHCP_PXELINUX_PREFIX:
++			pxelinux_prefix = malloc(opt_field[offset + 1] + 1);
++			if (pxelinux_prefix) {
++				memcpy(pxelinux_prefix, opt_field + offset + 2,
++				       opt_field[offset + 1]);
++				pxelinux_prefix[opt_field[offset + 1]] = 0;
++			}
++			offset += 2 + opt_field[offset + 1];
++			break;
++
+ 		case DHCP_PADOPT :
+ 			offset++;
+ 			break;
+@@ -681,6 +711,9 @@ static void dhcp_send_request(int fd)
+ 	opt.request_list[DHCP_ROUTER] = 1;
+ 	opt.request_list[DHCP_TFTP_SERVER] = 1;
+ 	opt.request_list[DHCP_BOOTFILE] = 1;
++	opt.request_list[DHCP_PXELINUX_CFGFILE] = 1;
++	opt.request_list[DHCP_PXELINUX_PREFIX] = 1;
++
+ 	opt.request_list[DHCP_CLIENT_ARCH] = USE_DHCPARCH;
+ 	opt.flag[DHCP_CLIENT_ARCH] = USE_DHCPARCH;
+ 
+@@ -716,7 +749,7 @@ void dhcp_send_release(int fd)
+ 	btph -> htype = 1;
+ 	btph -> hlen = 6;
+ 	btph -> xid = dhcp_xid;
+-	strcpy((char *) btph -> file, "");
++	btph -> file[0] = 0;
+ 	memcpy(btph -> chaddr, get_mac_address(), 6);
+ 	btph -> ciaddr = htonl(dhcp_own_ip);
+ 
+@@ -774,13 +807,14 @@ int8_t handle_dhcp(int fd, uint8_t * packet, int32_t packetsize)
+ 		dhcp_server_ip = htonl(iph -> ip_src);
+ 
+ 		if (strlen((char *) btph -> sname) && !dhcp_siaddr_ip) {
+-			strncpy((char *) dhcp_tftp_name, (char *) btph -> sname,
+-			        sizeof(btph -> sname));
++			strncpy(dhcp_tftp_name, (char *)btph->sname,
++			        sizeof(btph->sname));
+ 			dhcp_tftp_name[sizeof(btph -> sname)] = 0;
+ 		}
+ 
+ 		if (strlen((char *) btph -> file)) {
+-			strncpy((char *) dhcp_filename, (char *) btph -> file, sizeof(btph -> file));
++			strncpy(dhcp_filename, (char *)btph->file,
++			        sizeof(btph->file));
+ 			dhcp_filename[sizeof(btph -> file)] = 0;
+ 		}
+ 
+@@ -845,12 +879,14 @@ int8_t handle_dhcp(int fd, uint8_t * packet, int32_t packetsize)
+ 		dhcp_own_ip = htonl(btph -> yiaddr);
+ 		dhcp_siaddr_ip = htonl(btph -> siaddr);
+ 		if (strlen((char *) btph -> sname) && !dhcp_siaddr_ip) {
+-			strncpy((char *) dhcp_tftp_name, (char *) btph -> sname, sizeof(btph -> sname));
++			strncpy(dhcp_tftp_name, (char *)btph->sname,
++			        sizeof(btph->sname));
+ 			dhcp_tftp_name[sizeof(btph -> sname)] = 0;
+ 		}
+ 
+ 		if (strlen((char *) btph -> file)) {
+-			strncpy((char *) dhcp_filename, (char *) btph -> file, sizeof(btph -> file));
++			strncpy(dhcp_filename, (char *)btph->file,
++			        sizeof(btph->file));
+ 			dhcp_filename[sizeof(btph -> file)] = 0;
+ 		}
+ 
+@@ -883,14 +919,14 @@ int8_t handle_dhcp(int fd, uint8_t * packet, int32_t packetsize)
+ 				dhcp_server_ip = opt.server_ID;
+ 				dhcp_siaddr_ip = htonl(btph -> siaddr);
+ 				if (opt.flag[DHCP_TFTP_SERVER]) {
+-					strcpy((char *) dhcp_tftp_name, (char *) opt.tftp_server);
++					strcpy(dhcp_tftp_name, opt.tftp_server);
+ 				}
+ 				else {
+-					strcpy((char *) dhcp_tftp_name, "");
++					dhcp_filename[0] = 0;
+ 					if ((opt.overload != DHCP_OVERLOAD_SNAME &&
+ 					     opt.overload != DHCP_OVERLOAD_BOTH) &&
+ 					     !dhcp_siaddr_ip) {
+-						strncpy((char *) dhcp_tftp_name,
++						strncpy(dhcp_tftp_name,
+ 						        (char *) btph->sname,
+ 						        sizeof(btph -> sname));
+ 						dhcp_tftp_name[sizeof(btph->sname)] = 0;
+@@ -898,14 +934,14 @@ int8_t handle_dhcp(int fd, uint8_t * packet, int32_t packetsize)
+ 				}
+ 
+ 				if (opt.flag[DHCP_BOOTFILE]) {
+-					strcpy((char *) dhcp_filename, (char *) opt.bootfile);
++					strcpy(dhcp_filename, opt.bootfile);
+ 				}
+ 				else {
+-					strcpy((char *) dhcp_filename, "");
++					dhcp_filename[0] = 0;
+ 					if (opt.overload != DHCP_OVERLOAD_FILE &&
+-						opt.overload != DHCP_OVERLOAD_BOTH &&
+-						strlen((char *) btph -> file)) {
+-						strncpy((char *) dhcp_filename,
++					    opt.overload != DHCP_OVERLOAD_BOTH &&
++					    strlen((char *)btph->file)) {
++						strncpy(dhcp_filename,
+ 						        (char *) btph->file,
+ 						        sizeof(btph->file));
+ 						dhcp_filename[sizeof(btph -> file)] = 0;
+diff --git a/roms/SLOF/lib/libnet/dhcpv6.c b/roms/SLOF/lib/libnet/dhcpv6.c
+index 491d540..e92fc0f 100644
+--- a/roms/SLOF/lib/libnet/dhcpv6.c
++++ b/roms/SLOF/lib/libnet/dhcpv6.c
+@@ -176,8 +176,7 @@ static void dhcp6_process_options (uint8_t *option, int32_t option_length)
+ 			buffer[option_boot_url->length] = 0;
+ 			if (parse_tftp_args(buffer,
+ 					    (char *)my_fn_ip->server_ip6.addr,
+-					    (char *)my_fn_ip->filename,
+-					    (int)my_fn_ip->fd,
++					    my_fn_ip->filename, my_fn_ip->fd,
+ 					    option_boot_url->length) == -1)
+ 				return;
+ 			break;
+diff --git a/roms/SLOF/lib/libnet/ipv6.c b/roms/SLOF/lib/libnet/ipv6.c
+index 62a444e..6c6fb54 100644
+--- a/roms/SLOF/lib/libnet/ipv6.c
++++ b/roms/SLOF/lib/libnet/ipv6.c
+@@ -543,7 +543,7 @@ int send_ipv6(int fd, void* buffer, int len)
+ 			memset(n, 0, sizeof(struct neighbor));
+ 			memcpy(&(n->ip.addr[0]), &ip_dst, 16);
+ 			n->status = NB_PROBE;
+-			n->times_asked += 1;
++			n->times_asked = 1;
+ 			neighbor_add(n);
+ 		}
+ 
+diff --git a/roms/SLOF/lib/libnet/libnet.code b/roms/SLOF/lib/libnet/libnet.code
+index 3602543..419419d 100644
+--- a/roms/SLOF/lib/libnet/libnet.code
++++ b/roms/SLOF/lib/libnet/libnet.code
+@@ -4,13 +4,9 @@
+ PRIM(NET_X2d_LOAD)
+ 	int alen = TOS.n; POP;
+ 	char *arg = TOS.a; POP;
+-	int blocksize = TOS.n; POP;
+-	int hugeload = TOS.n; POP;
+-	void *replybuf = TOS.a; POP;
+ 	long maxlen = TOS.n; POP;
+ 	void *loadaddr = TOS.a;
+-	TOS.n = netload(loadaddr, maxlen, replybuf, hugeload, blocksize,
+-			arg, alen);
++	TOS.n = netload(loadaddr, maxlen, arg, alen);
+ MIRP
+ 
+ PRIM(NET_X2d_PING)
+diff --git a/roms/SLOF/lib/libnet/netapps.h b/roms/SLOF/lib/libnet/netapps.h
+index 2fea4a7..6e00466 100644
+--- a/roms/SLOF/lib/libnet/netapps.h
++++ b/roms/SLOF/lib/libnet/netapps.h
+@@ -18,8 +18,7 @@
+ 
+ struct filename_ip;
+ 
+-extern int netload(char *buffer, int len, char *ret_buffer, int huge_load,
+-		   int block_size, char *args_fs, int alen);
++extern int netload(char *buffer, int len, char *args_fs, int alen);
+ extern int ping(char *args_fs, int alen);
+ extern int dhcp(char *ret_buffer, struct filename_ip *fn_ip,
+ 		unsigned int retries, int flags);
+diff --git a/roms/SLOF/lib/libnet/netload.c b/roms/SLOF/lib/libnet/netload.c
+index cecb2a0..f7ec341 100644
+--- a/roms/SLOF/lib/libnet/netload.c
++++ b/roms/SLOF/lib/libnet/netload.c
+@@ -26,6 +26,7 @@
+ #include <helpers.h>
+ #include "args.h"
+ #include "netapps.h"
++#include "pxelinux.h"
+ 
+ #define IP_INIT_DEFAULT 5
+ #define IP_INIT_NONE    0
+@@ -34,6 +35,7 @@
+ #define IP_INIT_DHCPV6_STATELESS    3
+ #define IP_INIT_IPV6_MANUAL         4
+ 
++#define MAX_PKT_SIZE         1720
+ #define DEFAULT_BOOT_RETRIES 10
+ #define DEFAULT_TFTP_RETRIES 20
+ static int ip_version = 4;
+@@ -403,100 +405,132 @@ static void seed_rng(uint8_t mac[])
+ 	srand(seed);
+ }
+ 
+-static int tftp_load(filename_ip_t *fnip, unsigned char *buffer, int len,
+-		     unsigned int retries, int32_t mode,
+-		     int32_t blksize, int ip_vers)
++static int tftp_load(filename_ip_t *fnip, void *buffer, int len,
++                     unsigned int retries)
+ {
+ 	tftp_err_t tftp_err;
+ 	int rc;
+ 
+-	rc = tftp(fnip, buffer, len, retries, &tftp_err, mode, blksize, ip_vers);
++	rc = tftp(fnip, buffer, len, retries, &tftp_err);
+ 
+ 	if (rc > 0) {
+ 		printf("  TFTP: Received %s (%d KBytes)\n", fnip->filename,
+ 		       rc / 1024);
+-	} else if (rc == -1) {
+-		netload_error(0x3003, "unknown TFTP error");
+-		return -103;
+-	} else if (rc == -2) {
+-		netload_error(0x3004, "TFTP buffer of %d bytes "
+-			"is too small for %s",
+-			len, fnip->filename);
+-		return -104;
+-	} else if (rc == -3) {
+-		netload_error(0x3009, "file not found: %s",
+-			fnip->filename);
+-		return -108;
+-	} else if (rc == -4) {
+-		netload_error(0x3010, "TFTP access violation");
+-		return -109;
+-	} else if (rc == -5) {
+-		netload_error(0x3011, "illegal TFTP operation");
+-		return -110;
+-	} else if (rc == -6) {
+-		netload_error(0x3012, "unknown TFTP transfer ID");
+-		return -111;
+-	} else if (rc == -7) {
+-		netload_error(0x3013, "no such TFTP user");
+-		return -112;
+-	} else if (rc == -8) {
+-		netload_error(0x3017, "TFTP blocksize negotiation failed");
+-		return -116;
+-	} else if (rc == -9) {
+-		netload_error(0x3018, "file exceeds maximum TFTP transfer size");
+-		return -117;
+-	} else if (rc <= -10 && rc >= -15) {
+-		const char *icmp_err_str;
+-		switch (rc) {
+-		case -ICMP_NET_UNREACHABLE - 10:
+-			icmp_err_str = "net unreachable";
+-			break;
+-		case -ICMP_HOST_UNREACHABLE - 10:
+-			icmp_err_str = "host unreachable";
+-			break;
+-		case -ICMP_PROTOCOL_UNREACHABLE - 10:
+-			icmp_err_str = "protocol unreachable";
+-			break;
+-		case -ICMP_PORT_UNREACHABLE - 10:
+-			icmp_err_str = "port unreachable";
+-			break;
+-		case -ICMP_FRAGMENTATION_NEEDED - 10:
+-			icmp_err_str = "fragmentation needed and DF set";
+-			break;
+-		case -ICMP_SOURCE_ROUTE_FAILED - 10:
+-			icmp_err_str = "source route failed";
+-			break;
+-		default:
+-			icmp_err_str = " UNKNOWN";
+-			break;
++	} else {
++		int ecode;
++		const char *errstr = NULL;
++		rc = tftp_get_error_info(fnip, &tftp_err, rc, &errstr, &ecode);
++		if (errstr)
++			netload_error(ecode, errstr);
++	}
++
++	return rc;
++}
++
++static const char *get_uuid(void)
++{
++	char *addr;
++	int len;
++
++	if (SLOF_get_property("/", "system-id", &addr, &len))
++		return NULL;
++	if (len < 37) {    /* This should never happen... */
++		puts("Warning: UUID property is too short.");
++		return NULL;
++	}
++
++	return addr;
++}
++
++#define CFG_BUF_SIZE 2048
++#define MAX_PL_CFG_ENTRIES 16
++static int net_pxelinux_load(filename_ip_t *fnip, char *loadbase,
++                             int maxloadlen, uint8_t *mac, int retries)
++{
++	struct pl_cfg_entry entries[MAX_PL_CFG_ENTRIES];
++	int def, rc, ilen;
++	static char *cfgbuf;
++
++	cfgbuf = malloc(CFG_BUF_SIZE);
++	if (!cfgbuf) {
++		puts("Not enough memory for pxelinux config file buffer!");
++		return -1;
++	}
++
++	rc = pxelinux_load_parse_cfg(fnip, mac, get_uuid(), retries,
++	                             cfgbuf, CFG_BUF_SIZE,
++	                             entries, MAX_PL_CFG_ENTRIES, &def);
++	if (rc < 0)
++		goto out_free;
++	if (rc == 0) {
++		puts("No valid entries in pxelinux config file.");
++		rc = -1;
++		goto out_free;
++	}
++
++	/* Load kernel */
++	strncpy(fnip->filename, entries[def].kernel,
++		sizeof(fnip->filename) - 1);
++	fnip->filename[sizeof(fnip->filename) - 1] = 0;
++	rc = tftp_load(fnip, loadbase, maxloadlen, retries);
++	if (rc <= 0)
++		goto out_free;
++
++	/* Load ramdisk */
++	if (entries[def].initrd) {
++		loadbase += rc;
++		maxloadlen -= rc;
++		if (maxloadlen <= 0) {
++			puts("  Not enough space for loading the initrd!");
++			rc = -1;
++			goto out_free;
++		}
++		strncpy(fnip->filename, entries[def].initrd,
++			sizeof(fnip->filename) - 1);
++		ilen = tftp_load(fnip, loadbase, maxloadlen, retries);
++		if (ilen < 0) {
++			rc = ilen;
++			goto out_free;
+ 		}
+-		netload_error(0x3005, "ICMP ERROR \"%s\"", icmp_err_str);
+-		return -105;
+-	} else if (rc == -40) {
+-		netload_error(0x3014, "TFTP error occurred after "
+-			"%d bad packets received",
+-			tftp_err.bad_tftp_packets);
+-		return -113;
+-	} else if (rc == -41) {
+-		netload_error(0x3015, "TFTP error occurred after "
+-			"missing %d responses",
+-			tftp_err.no_packets);
+-		return -114;
+-	} else if (rc == -42) {
+-		netload_error(0x3016, "TFTP error missing block %d, "
+-			"expected block was %d",
+-			tftp_err.blocks_missed,
+-			tftp_err.blocks_received);
+-		return -115;
++		/* The ELF loader will move the kernel to some spot in low mem
++		 * later, thus move the initrd to the end of the RAM instead */
++		memmove(loadbase + maxloadlen - ilen, loadbase, ilen);
++		/* Encode the initrd information in the device tree */
++		SLOF_set_chosen_int("linux,initrd-start",
++		                    (long)loadbase + maxloadlen - ilen);
++		SLOF_set_chosen_int("linux,initrd-end",
++		                    (long)loadbase + maxloadlen);
+ 	}
+ 
++	if (entries[def].append) {
++		SLOF_set_chosen_bytes("bootargs", entries[def].append,
++		                      strlen(entries[def].append) + 1);
++	}
++
++out_free:
++	free(cfgbuf);
+ 	return rc;
+ }
+ 
+-int netload(char *buffer, int len, char *ret_buffer, int huge_load,
+-	    int block_size, char *args_fs, int alen)
++static void encode_response(char *pkt_buffer, size_t size, int ip_init)
+ {
+-	int rc;
++	switch(ip_init) {
++	case IP_INIT_BOOTP:
++		SLOF_encode_bootp_response(pkt_buffer, size);
++		break;
++	case IP_INIT_DHCP:
++	case IP_INIT_DHCPV6_STATELESS:
++	case IP_INIT_DEFAULT:
++		SLOF_encode_dhcp_response(pkt_buffer, size);
++		break;
++	default:
++		break;
++	}
++}
++
++int netload(char *buffer, int len, char *args_fs, int alen)
++{
++	int rc, filename_len;
+ 	filename_ip_t fn_ip;
+ 	int fd_device;
+ 	obp_tftp_args_t obp_tftp_args;
+@@ -506,6 +540,14 @@ int netload(char *buffer, int len, char *ret_buffer, int huge_load,
+ 			     0x00, 0x00, 0x00, 0x00, 
+ 			     0x00, 0x00, 0x00, 0x00 };
+ 	uint8_t own_mac[6];
++	char *pkt_buffer;
++
++	pkt_buffer = SLOF_alloc_mem(MAX_PKT_SIZE);
++	if (!pkt_buffer) {
++		puts("ERROR: Unable to allocate memory");
++		return -1;
++	}
++	memset(pkt_buffer, 0, MAX_PKT_SIZE);
+ 
+ 	puts("\n Initializing NIC");
+ 	memset(&fn_ip, 0, sizeof(filename_ip_t));
+@@ -533,11 +575,13 @@ int netload(char *buffer, int len, char *ret_buffer, int huge_load,
+ 
+ 	if (fd_device == -1) {
+ 		netload_error(0x3000, "Could not read MAC address");
+-		return -100;
++		rc = -100;
++		goto err_out;
+ 	}
+ 	else if (fd_device == -2) {
+ 		netload_error(0x3006, "Could not initialize network device");
+-		return -101;
++		rc = -101;
++		goto err_out;
+ 	}
+ 
+ 	fn_ip.fd = fd_device;
+@@ -556,7 +600,8 @@ int netload(char *buffer, int len, char *ret_buffer, int huge_load,
+ 		char args[256];
+ 		if (alen > sizeof(args) - 1) {
+ 			puts("ERROR: Parameter string is too long.");
+-			return -7;
++			rc = -7;
++			goto err_out;
+ 		}
+ 		/* Convert forth string into NUL-terminated C-string */
+ 		strncpy(args, args_fs, alen);
+@@ -615,13 +660,13 @@ int netload(char *buffer, int len, char *ret_buffer, int huge_load,
+ 		else {
+ 			memcpy(&fn_ip.server_ip, obp_tftp_args.giaddr, 4);
+ 		}
+-		rc = bootp(ret_buffer, &fn_ip, obp_tftp_args.bootp_retries);
++		rc = bootp(pkt_buffer, &fn_ip, obp_tftp_args.bootp_retries);
+ 		break;
+ 	case IP_INIT_DHCP:
+-		rc = dhcp(ret_buffer, &fn_ip, obp_tftp_args.bootp_retries, F_IPV4);
++		rc = dhcp(pkt_buffer, &fn_ip, obp_tftp_args.bootp_retries, F_IPV4);
+ 		break;
+ 	case IP_INIT_DHCPV6_STATELESS:
+-		rc = dhcp(ret_buffer, &fn_ip,
++		rc = dhcp(pkt_buffer, &fn_ip,
+ 			  obp_tftp_args.bootp_retries, F_IPV6);
+ 		break;
+ 	case IP_INIT_IPV6_MANUAL:
+@@ -637,7 +682,7 @@ int netload(char *buffer, int len, char *ret_buffer, int huge_load,
+ 		}
+ 		break;
+ 	case IP_INIT_DEFAULT:
+-		rc = dhcp(ret_buffer, &fn_ip, obp_tftp_args.bootp_retries, 0);
++		rc = dhcp(pkt_buffer, &fn_ip, obp_tftp_args.bootp_retries, 0);
+ 		break;
+ 	case IP_INIT_NONE:
+ 	default:
+@@ -668,7 +713,8 @@ int netload(char *buffer, int len, char *ret_buffer, int huge_load,
+ 	if (rc == -1) {
+ 		netload_error(0x3001, "Could not get IP address");
+ 		close(fn_ip.fd);
+-		return -101;
++		rc = -101;
++		goto err_out;
+ 	}
+ 
+ 	if (ip_version == 4) {
+@@ -689,12 +735,14 @@ int netload(char *buffer, int len, char *ret_buffer, int huge_load,
+ 			((fn_ip.server_ip >>  8) & 0xFF),
+ 			( fn_ip.server_ip        & 0xFF));
+ 		close(fn_ip.fd);
+-		return -102;
++		rc = -102;
++		goto err_out;
+ 	}
+ 	if (rc == -4 || rc == -3) {
+ 		netload_error(0x3008, "Can't obtain TFTP server IP address");
+ 		close(fn_ip.fd);
+-		return -107;
++		rc = -107;
++		goto err_out;
+ 	}
+ 
+ 	/***********************************************************
+@@ -704,10 +752,12 @@ int netload(char *buffer, int len, char *ret_buffer, int huge_load,
+ 	 ***********************************************************/
+ 
+ 	if (obp_tftp_args.filename[0] != 0) {
+-		strncpy((char *) fn_ip.filename, obp_tftp_args.filename, sizeof(fn_ip.filename)-1);
++		strncpy(fn_ip.filename, obp_tftp_args.filename, sizeof(fn_ip.filename)-1);
+ 		fn_ip.filename[sizeof(fn_ip.filename)-1] = 0;
+ 	}
+ 
++	fn_ip.ip_version = ip_version;
++
+ 	if (ip_version == 4) {
+ 		printf("  Requesting file \"%s\" via TFTP from %d.%d.%d.%d\n",
+ 			fn_ip.filename,
+@@ -723,14 +773,30 @@ int netload(char *buffer, int len, char *ret_buffer, int huge_load,
+ 	}
+ 
+ 	/* Do the TFTP load and print error message if necessary */
+-	rc = tftp_load(&fn_ip, (unsigned char *)buffer, len,
+-		       obp_tftp_args.tftp_retries, huge_load,
+-		       block_size, ip_version);
++	rc = 0;
++	filename_len = strlen(fn_ip.filename);
++	if (filename_len > 0 && fn_ip.filename[filename_len - 1] != '/' &&
++	    !fn_ip.pl_cfgfile) {
++		rc = tftp_load(&fn_ip, buffer, len, obp_tftp_args.tftp_retries);
++	}
++
++	if (rc <= 0 && !obp_tftp_args.filename[0] &&
++	    (!filename_len || fn_ip.filename[filename_len - 1] == '/')) {
++		rc = net_pxelinux_load(&fn_ip, buffer, len, own_mac,
++		                       obp_tftp_args.tftp_retries);
++	}
+ 
+ 	if (obp_tftp_args.ip_init == IP_INIT_DHCP)
+ 		dhcp_send_release(fn_ip.fd);
+ 
+ 	close(fn_ip.fd);
+ 
++	if (rc >= 0) {
++		encode_response(pkt_buffer, MAX_PKT_SIZE, obp_tftp_args.ip_init);
++	}
++  err_out:
++	SLOF_free_mem(pkt_buffer, MAX_PKT_SIZE);
++	free(fn_ip.pl_cfgfile);
++	free(fn_ip.pl_prefix);
+ 	return rc;
+ }
+diff --git a/roms/SLOF/lib/libnet/ping.c b/roms/SLOF/lib/libnet/ping.c
+index edad5eb..051269f 100644
+--- a/roms/SLOF/lib/libnet/ping.c
++++ b/roms/SLOF/lib/libnet/ping.c
+@@ -115,6 +115,7 @@ int ping(char *args_fs, int alen)
+ 	uint8_t own_mac[6];
+ 	uint32_t netmask;
+ 	char args[256];
++	int ret = -1;
+ 
+ 	memset(&ping_args, 0, sizeof(struct ping_args));
+ 
+@@ -164,8 +165,7 @@ int ping(char *args_fs, int alen)
+ 
+ 		if (arp_failed == -1) {
+ 			printf("\n  DHCP: Could not get ip address\n");
+-			close(fn_ip.fd);
+-			return -1;
++			goto free_out;
+ 		}
+ 
+ 	} else {
+@@ -210,12 +210,16 @@ int ping(char *args_fs, int alen)
+ 		receive_ether(fd_device);
+ 		if(pong_ipv4() == 0) {
+ 			printf("success\n");
+-			close(fn_ip.fd);
+-			return 0;
++			ret = 0;
++			goto free_out;
+ 		}
+ 	}
+ 
+ 	printf("failed\n");
++free_out:
++	free(fn_ip.pl_cfgfile);
++	free(fn_ip.pl_prefix);
+ 	close(fn_ip.fd);
+-	return -1;
++
++	return ret;
+ }
+diff --git a/roms/SLOF/lib/libnet/pxelinux.c b/roms/SLOF/lib/libnet/pxelinux.c
+new file mode 100644
+index 0000000..c4ac5d5
+--- /dev/null
++++ b/roms/SLOF/lib/libnet/pxelinux.c
+@@ -0,0 +1,251 @@
++/*****************************************************************************
++ * pxelinux.cfg-style config file support.
++ *
++ * See https://www.syslinux.org/wiki/index.php?title=PXELINUX for information
++ * about the pxelinux config file layout.
++ *
++ * Copyright 2018 Red Hat, Inc.
++ *
++ * This program and the accompanying materials are made available under the
++ * terms of the BSD License which accompanies this distribution, and is
++ * available at http://www.opensource.org/licenses/bsd-license.php
++ *
++ * Contributors:
++ *     Thomas Huth, Red Hat Inc. - initial implementation
++ *****************************************************************************/
++
++#include <stdio.h>
++#include <string.h>
++#include <assert.h>
++#include "tftp.h"
++#include "pxelinux.h"
++
++/**
++ * Call tftp() and report errors (excet "file-not-found" errors)
++ */
++static int pxelinux_tftp_load(filename_ip_t *fnip, void *buffer, int len,
++                              int retries)
++{
++	tftp_err_t tftp_err;
++	int rc, ecode;
++
++	rc = tftp(fnip, buffer, len, retries, &tftp_err);
++
++	if (rc > 0) {
++		printf("\r  TFTP: Received %s (%d bytes)\n",
++		       fnip->filename, rc);
++	} else if (rc == -3) {
++		/* Ignore file-not-found (since we are probing the files)
++		 * and simply erase the "Receiving data:  0 KBytes" string */
++		printf("\r                           \r");
++	} else {
++		const char *errstr = NULL;
++		rc = tftp_get_error_info(fnip, &tftp_err, rc, &errstr, &ecode);
++		if (errstr)
++			printf("\r  TFTP error: %s\n", errstr);
++	}
++
++	return rc;
++}
++
++/**
++ * Try to load a pxelinux.cfg file by probing the possible file names.
++ * Note that this function will overwrite filename_ip_t->filename.
++ */
++static int pxelinux_load_cfg(filename_ip_t *fn_ip, uint8_t *mac, const char *uuid,
++                             int retries, char *cfgbuf, int cfgbufsize)
++{
++	int rc, idx;
++	char *baseptr;
++
++	/* Did we get a usable base directory via DHCP? */
++	if (fn_ip->pl_prefix) {
++		idx = strlen(fn_ip->pl_prefix);
++		/* Do we have enough space left to store a UUID file name? */
++		if (idx > sizeof(fn_ip->filename) - 36) {
++			puts("Error: pxelinux prefix is too long!");
++			return -1;
++		}
++		strcpy(fn_ip->filename, fn_ip->pl_prefix);
++		baseptr = &fn_ip->filename[idx];
++	} else {
++		/* Try to get a usable base directory from the DHCP bootfile name */
++		baseptr = strrchr(fn_ip->filename, '/');
++		if (!baseptr)
++			baseptr = fn_ip->filename;
++		else
++			++baseptr;
++		/* Check that we've got enough space to store "pxelinux.cfg/"
++		 * and the UUID (which is the longest file name) there */
++		if (baseptr - fn_ip->filename > sizeof(fn_ip->filename) - 50) {
++			puts("Error: The bootfile string is too long for "
++			     "deriving the pxelinux.cfg file name from it.");
++			return -1;
++		}
++		strcpy(baseptr, "pxelinux.cfg/");
++		baseptr += strlen(baseptr);
++	}
++
++	puts("Trying pxelinux.cfg files...");
++
++	/* Try to load config file according to file name in DHCP option 209 */
++	if (fn_ip->pl_cfgfile) {
++		if (strlen(fn_ip->pl_cfgfile) + strlen(fn_ip->filename)
++		    > sizeof(fn_ip->filename)) {
++			puts("Error: pxelinux.cfg prefix + filename too long!");
++			return -1;
++		}
++		strcpy(baseptr, fn_ip->pl_cfgfile);
++		rc = pxelinux_tftp_load(fn_ip, cfgbuf, cfgbufsize, retries);
++		if (rc > 0) {
++			return rc;
++		}
++	}
++
++	/* Try to load config file with name based on the VM UUID */
++	if (uuid) {
++		strcpy(baseptr, uuid);
++		rc = pxelinux_tftp_load(fn_ip, cfgbuf, cfgbufsize, retries);
++		if (rc > 0) {
++			return rc;
++		}
++	}
++
++	/* Look for config file with MAC address in its name */
++	sprintf(baseptr, "01-%02x-%02x-%02x-%02x-%02x-%02x",
++		mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
++	rc = pxelinux_tftp_load(fn_ip, cfgbuf, cfgbufsize, retries);
++	if (rc > 0) {
++		return rc;
++	}
++
++	/* Look for config file with IP address in its name */
++	if (fn_ip->ip_version == 4) {
++		sprintf(baseptr, "%02X%02X%02X%02X",
++			(fn_ip->own_ip >> 24) & 0xff,
++			(fn_ip->own_ip >> 16) & 0xff,
++			(fn_ip->own_ip >> 8) & 0xff,
++			fn_ip->own_ip & 0xff);
++		for (idx = 0; idx <= 7; idx++) {
++			baseptr[8 - idx] = 0;
++			rc = pxelinux_tftp_load(fn_ip, cfgbuf, cfgbufsize,
++			                        retries);
++			if (rc > 0) {
++				return rc;
++			}
++		}
++	}
++
++	/* Try "default" config file */
++	strcpy(baseptr, "default");
++	rc = pxelinux_tftp_load(fn_ip, cfgbuf, cfgbufsize, retries);
++
++	return rc;
++}
++
++/**
++ * Parse a pxelinux-style configuration file.
++ * The discovered entries are filled into the "struct pl_cfg_entry entries[]"
++ * array. Note that the callers must keep the cfg buffer valid as long as
++ * they wish to access the "struct pl_cfg_entry" entries, since the pointers
++ * in entries point to the original location in the cfg buffer area. The cfg
++ * buffer is altered for this, too, e.g. terminating NUL-characters are put
++ * into the right locations.
++ * @param cfg          Pointer to the buffer with contents of the config file.
++ *                     The caller must make sure that it is NUL-terminated.
++ * @param cfgsize      Size of the cfg data (including the terminating NUL)
++ * @param entries      Pointer to array where the results should be put into
++ * @param max_entries  Number of available slots in the entries array
++ * @param def_ent      Used to return the index of the default entry
++ * @return             Number of valid entries
++ */
++int pxelinux_parse_cfg(char *cfg, int cfgsize, struct pl_cfg_entry *entries,
++                       int max_entries, int *def_ent)
++{
++	int num_entries = 0;
++	char *ptr = cfg, *nextptr, *eol, *arg;
++	char *defaultlabel = NULL;
++
++	*def_ent = 0;
++
++	while (ptr < cfg + cfgsize && num_entries < max_entries) {
++		eol = strchr(ptr, '\n');
++		if (!eol) {
++			eol = cfg + cfgsize - 1;
++		}
++		nextptr = eol + 1;
++		do {
++			*eol-- = '\0';	/* Remove spaces, tabs and returns */
++		} while (eol >= ptr &&
++		         (*eol == '\r' || *eol == ' ' || *eol == '\t'));
++		while (*ptr == ' ' || *ptr == '\t') {
++			ptr++;
++		}
++		if (*ptr == 0 || *ptr == '#') {
++			goto nextline;	/* Ignore comments and empty lines */
++		}
++		arg = strchr(ptr, ' ');	/* Search space between cmnd and arg */
++		if (!arg) {
++			arg = strchr(ptr, '\t');
++		}
++		if (!arg) {
++			printf("Failed to parse this line:\n %s\n", ptr);
++			goto nextline;
++		}
++		*arg++ = 0;
++		while (*arg == ' ' || *arg == '\t') {
++			arg++;
++		}
++		if (!strcasecmp("default", ptr)) {
++			defaultlabel = arg;
++		} else if (!strcasecmp("label", ptr)) {
++			entries[num_entries].label = arg;
++			if (defaultlabel && !strcmp(arg, defaultlabel)) {
++				*def_ent = num_entries;
++			}
++			num_entries++;
++		} else if (!strcasecmp("kernel", ptr) && num_entries) {
++			entries[num_entries - 1].kernel = arg;
++		} else if (!strcasecmp("initrd", ptr) && num_entries) {
++			entries[num_entries - 1].initrd = arg;
++		} else if (!strcasecmp("append", ptr) && num_entries) {
++			entries[num_entries - 1].append = arg;
++		} else {
++			printf("Command '%s' is not supported.\n", ptr);
++		}
++nextline:
++		ptr = nextptr;
++	}
++
++	return num_entries;
++}
++
++/**
++ * Try to load and parse a pxelinux-style configuration file.
++ * @param fn_ip        must contain server and client IP information
++ * @param mac          MAC address which should be used for probing
++ * @param uuid         UUID which should be used for probing (can be NULL)
++ * @param retries      Amount of TFTP retries before giving up
++ * @param cfgbuf       Pointer to the buffer where config file should be loaded
++ * @param cfgsize      Size of the cfgbuf buffer
++ * @param entries      Pointer to array where the results should be put into
++ * @param max_entries  Number of available slots in the entries array
++ * @param def_ent      Used to return the index of the default entry
++ * @return             Number of valid entries
++ */
++int pxelinux_load_parse_cfg(filename_ip_t *fn_ip, uint8_t *mac, const char *uuid,
++                            int retries, char *cfgbuf, int cfgsize,
++                            struct pl_cfg_entry *entries, int max_entries,
++                            int *def_ent)
++{
++	int rc;
++
++	rc = pxelinux_load_cfg(fn_ip, mac, uuid, retries, cfgbuf, cfgsize - 1);
++	if (rc < 0)
++		return rc;
++	assert(rc < cfgsize);
++
++	cfgbuf[rc++] = '\0';	/* Make sure it is NUL-terminated */
++
++	return pxelinux_parse_cfg(cfgbuf, rc, entries, max_entries, def_ent);
++}
+diff --git a/roms/SLOF/lib/libnet/pxelinux.h b/roms/SLOF/lib/libnet/pxelinux.h
+new file mode 100644
+index 0000000..0514d0d
+--- /dev/null
++++ b/roms/SLOF/lib/libnet/pxelinux.h
+@@ -0,0 +1,33 @@
++/*****************************************************************************
++ * Definitions for pxelinux-style config file support
++ *
++ * Copyright 2018 Red Hat, Inc.
++ *
++ * This program and the accompanying materials
++ * are made available under the terms of the BSD License
++ * which accompanies this distribution, and is available at
++ * http://www.opensource.org/licenses/bsd-license.php
++ *
++ * Contributors:
++ *     Thomas Huth, Red Hat Inc. - initial implementation
++ *****************************************************************************/
++
++#ifndef LIBNET_PXELINUX_H
++#define LIBNET_PXELINUX_H
++
++/* This structure holds the data from one pxelinux.cfg file entry */
++struct pl_cfg_entry {
++    const char *label;
++    const char *kernel;
++    const char *initrd;
++    const char *append;
++};
++
++int pxelinux_parse_cfg(char *cfg, int cfgsize, struct pl_cfg_entry *entries,
++                       int max_entries, int *def_ent);
++int pxelinux_load_parse_cfg(filename_ip_t *fn_ip, uint8_t *mac, const char *uuid,
++                            int retries, char *cfgbuf, int cfgsize,
++                            struct pl_cfg_entry *entries,
++                            int max_entries, int *def_ent);
++
++#endif
+diff --git a/roms/SLOF/lib/libnet/tftp.c b/roms/SLOF/lib/libnet/tftp.c
+index cda8bf3..9a5817a 100644
+--- a/roms/SLOF/lib/libnet/tftp.c
++++ b/roms/SLOF/lib/libnet/tftp.c
+@@ -97,7 +97,7 @@ static void send_rrq(int fd)
+ 	int ip_len = 0;
+ 	int ip6_payload_len    = 0;
+ 	unsigned short udp_len = 0;
+-	unsigned char mode[] = "octet";
++	const char mode[] = "octet";
+ 	char *ptr	     = NULL;
+ 	struct iphdr *ip     = NULL;
+ 	struct ip6hdr *ip6   = NULL;
+@@ -110,7 +110,7 @@ static void send_rrq(int fd)
+ 		ip = (struct iphdr *) packet;
+ 		udph = (struct udphdr *) (ip + 1);
+ 		ip_len = sizeof(struct iphdr) + sizeof(struct udphdr)
+-			+ strlen((char *) fn_ip->filename) + strlen((char *) mode) + 4
++			+ strlen(fn_ip->filename) + strlen(mode) + 4
+ 			+ strlen("blksize") + strlen(blocksize_str) + 2;
+ 		fill_iphdr ((uint8_t *) ip, ip_len, IPTYPE_UDP, 0,
+ 			    fn_ip->server_ip);
+@@ -119,7 +119,7 @@ static void send_rrq(int fd)
+ 		ip6 = (struct ip6hdr *) packet;
+ 		udph = (struct udphdr *) (ip6 + 1);
+ 		ip6_payload_len = sizeof(struct udphdr)
+-			+ strlen((char *) fn_ip->filename) + strlen((char *) mode) + 4
++			+ strlen(fn_ip->filename) + strlen(mode) + 4
+ 			+ strlen("blksize") + strlen(blocksize_str) + 2;
+ 		ip_len = sizeof(struct ip6hdr) + ip6_payload_len;
+ 		fill_ip6hdr ((uint8_t *) ip6, ip6_payload_len, IPTYPE_UDP, get_ipv6_address(),
+@@ -127,7 +127,7 @@ static void send_rrq(int fd)
+ 
+ 	}
+ 	udp_len = htons(sizeof(struct udphdr)
+-			      + strlen((char *) fn_ip->filename) + strlen((char *) mode) + 4
++			      + strlen(fn_ip->filename) + strlen(mode) + 4
+ 			      + strlen("blksize") + strlen(blocksize_str) + 2);
+ 	fill_udphdr ((uint8_t *) udph, udp_len, htons(2001), htons(69));
+ 
+@@ -135,12 +135,12 @@ static void send_rrq(int fd)
+ 	tftp->th_opcode = htons(RRQ);
+ 
+ 	ptr = (char *) &tftp->th_data;
+-	memcpy(ptr, fn_ip->filename, strlen((char *) fn_ip->filename) + 1);
++	memcpy(ptr, fn_ip->filename, strlen(fn_ip->filename) + 1);
+ 
+-	ptr += strlen((char *) fn_ip->filename) + 1;
+-	memcpy(ptr, mode, strlen((char *) mode) + 1);
++	ptr += strlen(fn_ip->filename) + 1;
++	memcpy(ptr, mode, strlen(mode) + 1);
+ 
+-	ptr += strlen((char *) mode) + 1;
++	ptr += strlen(mode) + 1;
+ 	memcpy(ptr, "blksize", strlen("blksize") + 1);
+ 
+ 	ptr += strlen("blksize") + 1;
+@@ -497,20 +497,16 @@ void handle_tftp_dun(uint8_t err_code)
+  * @param  _len          size of destination buffer
+  * @param  _retries      max number of retries
+  * @param  _tftp_err     contains info about TFTP-errors (e.g. lost packets)
+- * @param  _mode         NON ZERO - multicast, ZERO - unicast
+- * @param  _blocksize    blocksize for DATA-packets
+  * @return               ZERO - error condition occurs
+  *                       NON ZERO - size of received file
+  */
+ int tftp(filename_ip_t * _fn_ip, unsigned char *_buffer, int _len,
+-	 unsigned int _retries, tftp_err_t * _tftp_err,
+-	 int32_t _mode, int32_t _blocksize, int _ip_version)
++	 unsigned int _retries, tftp_err_t * _tftp_err)
+ {
+ 	retries     = _retries;
+ 	fn_ip       = _fn_ip;
+ 	len         = _len;
+-	huge_load   = _mode;
+-	ip_version  = _ip_version;
++	ip_version  = _fn_ip->ip_version;
+ 	tftp_errno  = 0;
+ 	tftp_err    = _tftp_err;
+ 	tftp_err->bad_tftp_packets = 0;
+@@ -523,17 +519,14 @@ int tftp(filename_ip_t * _fn_ip, unsigned char *_buffer, int _len,
+ 	port_number = -1;
+ 	progress_first = -1;
+ 	progress_last_bytes = 0;
++	huge_load   = 1;
+ 
+ 	/* Default blocksize must be 512 for TFTP servers
+ 	 * which do not support the RRQ blocksize option */
+ 	blocksize = 512;
+ 
+ 	/* Preferred blocksize - used as option for the read request */
+-	if (_blocksize < 8)
+-		_blocksize = 8;
+-	else if (_blocksize > MAX_BLOCKSIZE)
+-		_blocksize = MAX_BLOCKSIZE;
+-	sprintf(blocksize_str, "%d", _blocksize);
++	sprintf(blocksize_str, "%d", MAX_BLOCKSIZE);
+ 
+ 	printf("  Receiving data:  ");
+ 	print_progress(-1, 0);
+@@ -697,3 +690,104 @@ int parse_tftp_args(char buffer[], char *server_ip, char filename[], int fd,
+ 		return 0;
+ 	}
+ }
++
++int tftp_get_error_info(filename_ip_t *fnip, tftp_err_t *tftperr, int rc,
++                        const char **errstr, int *ecode)
++{
++	static char estrbuf[80];
++
++	if (rc == -1) {
++		*ecode = 0x3003;
++		*errstr = "unknown TFTP error";
++		return -103;
++	} else if (rc == -2) {
++		*ecode = 0x3004;
++		snprintf(estrbuf, sizeof(estrbuf),
++			 "TFTP buffer of %d bytes is too small for %s", len,
++			fnip->filename);
++		*errstr = estrbuf;
++		return -104;
++	} else if (rc == -3) {
++		*ecode = 0x3009;
++		snprintf(estrbuf, sizeof(estrbuf), "file not found: %s",
++			 fnip->filename);
++		*errstr = estrbuf;
++		return -108;
++	} else if (rc == -4) {
++		*ecode = 0x3010;
++		*errstr = "TFTP access violation";
++		return -109;
++	} else if (rc == -5) {
++		*ecode = 0x3011;
++		*errstr = "illegal TFTP operation";
++		return -110;
++	} else if (rc == -6) {
++		*ecode = 0x3012;
++		*errstr = "unknown TFTP transfer ID";
++		return -111;
++	} else if (rc == -7) {
++		*ecode = 0x3013;
++		*errstr = "no such TFTP user";
++		return -112;
++	} else if (rc == -8) {
++		*ecode = 0x3017;
++		*errstr = "TFTP blocksize negotiation failed";
++		return -116;
++	} else if (rc == -9) {
++		*ecode = 0x3018;
++		*errstr = "file exceeds maximum TFTP transfer size";
++		return -117;
++	} else if (rc <= -10 && rc >= -15) {
++		const char *icmp_err_str;
++		switch (rc) {
++		case -ICMP_NET_UNREACHABLE - 10:
++			icmp_err_str = "net unreachable";
++			break;
++		case -ICMP_HOST_UNREACHABLE - 10:
++			icmp_err_str = "host unreachable";
++			break;
++		case -ICMP_PROTOCOL_UNREACHABLE - 10:
++			icmp_err_str = "protocol unreachable";
++			break;
++		case -ICMP_PORT_UNREACHABLE - 10:
++			icmp_err_str = "port unreachable";
++			break;
++		case -ICMP_FRAGMENTATION_NEEDED - 10:
++			icmp_err_str = "fragmentation needed and DF set";
++			break;
++		case -ICMP_SOURCE_ROUTE_FAILED - 10:
++			icmp_err_str = "source route failed";
++			break;
++		default:
++			icmp_err_str = "UNKNOWN";
++			break;
++		}
++		*ecode = 0x3005;
++		sprintf(estrbuf, "ICMP ERROR \"%s\"", icmp_err_str);
++		*errstr = estrbuf;
++		return -105;
++	} else if (rc == -40) {
++		*ecode = 0x3014;
++		sprintf(estrbuf,
++			"TFTP error occurred after %d bad packets received",
++			tftperr->bad_tftp_packets);
++		*errstr = estrbuf;
++		return -113;
++	} else if (rc == -41) {
++		*ecode = 0x3015;
++		sprintf(estrbuf,
++			"TFTP error occurred after missing %d responses",
++			tftperr->no_packets);
++		*errstr = estrbuf;
++		return -114;
++	} else if (rc == -42) {
++		*ecode = 0x3016;
++		sprintf(estrbuf,
++			"TFTP error missing block %d, expected block was %d",
++			tftperr->blocks_missed, tftperr->blocks_received);
++		*errstr = estrbuf;
++		return -115;
++	}
++
++	return rc;
++}
+diff --git a/roms/SLOF/lib/libnet/tftp.h b/roms/SLOF/lib/libnet/tftp.h
+index b1dbc21..d2c0919 100644
+--- a/roms/SLOF/lib/libnet/tftp.h
++++ b/roms/SLOF/lib/libnet/tftp.h
+@@ -28,9 +28,12 @@ struct filename_ip {
+ 	uint32_t server_ip;
+ 	ip6_addr_t server_ip6;
+ 	ip6_addr_t dns_ip6;
+-	int8_t filename[256];
+-	int    fd;
+-} __attribute__ ((packed));
++	char filename[256];
++	char *pl_cfgfile; /* For PXELINUX DHCPv4 option 209. Must be free()ed */
++	char *pl_prefix;  /* For PXELINUX DHCPv4 option 210. Must be free()ed */
++	int fd;
++	int ip_version;
++};
+ typedef struct filename_ip filename_ip_t;
+ 
+ typedef struct {
+@@ -40,11 +43,12 @@ typedef struct {
+ 	uint32_t blocks_received;
+ } tftp_err_t;
+ 
+-int tftp(filename_ip_t *, unsigned char  *, int, unsigned int,
+-         tftp_err_t *, int32_t mode, int32_t blocksize, int ip_version);
+-
++int tftp(filename_ip_t *fnip, unsigned char *buf, int len,
++         unsigned int retries, tftp_err_t *err);
+ int32_t handle_tftp(int fd, uint8_t *, int32_t);
+ void handle_tftp_dun(uint8_t err_code);
+ int parse_tftp_args(char buffer[], char *server_ip, char filename[], int fd, int len);
++int tftp_get_error_info(filename_ip_t *fnip, tftp_err_t *tftperr, int rc,
++                        const char **errstr, int *ecode);
+ 
+ #endif
+-- 
+2.17.1
+

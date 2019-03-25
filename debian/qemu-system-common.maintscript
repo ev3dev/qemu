@@ -1,0 +1,4 @@
+# drop qemu-kvm upstart script
+rm_conffile /etc/init/qemu-kvm.conf 1:2.8+dfsg-1ubuntu1~
+# drop qemu-kvm SysV style init
+rm_conffile /etc/init.d/qemu-kvm 1:2.8+dfsg-1ubuntu1~

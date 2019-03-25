@@ -1,0 +1,37 @@
+#!/bin/sh
+set -f
+
+getcpu() {
+   CPU="unknown"
+   [ -r /proc/cpuinfo ] || return
+   local line
+   while read line; do
+      set -- $line
+      [ "$1" = "cpu" ] && CPU="$3" && return 0;
+   done < /proc/cpuinfo
+   return
+}
+
+getcpu
+case "$CPU" in
+  e500*|e6500*|e5500*)
+    qemu=qemu-system-ppcemb
+    ;;
+  *)
+    case "$(uname -m)" in
+      ppc64*)
+        SMT=$(/usr/sbin/ppc64_cpu --smt 2>&1 | grep -q "SMT=[248]")
+        if [ -n "$SMT" ]
+        then
+          echo "Error: You must disable SMT if you want to run QEMU/KVM on ppc64le archtecture"
+          echo "In order to disable SMT, run: # ppc64_cpu --smt=off"
+        fi
+        qemu=qemu-system-ppc64
+        ;;
+      *)
+        qemu=qemu-system-ppc
+        ;;
+    esac
+  ;;
+esac
+exec "$qemu" -enable-kvm "$@"

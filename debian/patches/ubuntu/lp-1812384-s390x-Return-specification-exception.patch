@@ -1,0 +1,43 @@
+From 37dbd1f4d4805edcd18d94eb202bb3461b3cd52d Mon Sep 17 00:00:00 2001
+From: Janosch Frank <frankja@linux.ibm.com>
+Date: Fri, 11 Jan 2019 12:36:57 +0100
+Subject: [PATCH] s390x: Return specification exception for unimplemented diag
+ 308 subcodes
+
+The architecture specifies specification exceptions for all
+unavailable subcodes.
+
+The presence of subcodes is indicated by checking some query subcode.
+For example 6 will indicate that 3-6 are available. So future systems
+might call new subcodes to check for new features. This should not
+trigger a hw error, instead we return the architectured specification
+exception.
+
+Signed-off-by: Janosch Frank <frankja@linux.ibm.com>
+Cc: qemu-stable@nongnu.org
+Message-Id: <20190111113657.66195-3-frankja@linux.ibm.com>
+Reviewed-by: Christian Borntraeger <borntraeger@de.ibm.com>
+Reviewed-by: David Hildenbrand <david@redhat.com>
+Signed-off-by: Cornelia Huck <cohuck@redhat.com>
+
+Author: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+Original-Author: Janosch Frank <frankja@linux.ibm.com>
+Origin: backport, https://git.qemu.org/?p=qemu.git;a=commit;h=37dbd1f4d4805edcd18d94eb202bb3461b3cd52d
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1812384
+Last-Update: 2018-01-31
+
+---
+ target/s390x/diag.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/target/s390x/diag.c
++++ b/target/s390x/diag.c
+@@ -182,7 +182,7 @@ out:
+         }
+         return;
+     default:
+-        hw_error("Unhandled diag308 subcode %" PRIx64, subcode);
++        program_interrupt(env, PGM_SPECIFICATION, ILEN_AUTO);
+         break;
+     }
+ }

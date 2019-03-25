@@ -1,0 +1,40 @@
+From cb931c2108a59db0b4a22f0c439ee7362c4f95ab Mon Sep 17 00:00:00 2001
+From: Suraj Jitindar Singh <sjitindarsingh@gmail.com>
+Date: Thu, 1 Mar 2018 17:37:58 +1100
+Subject: [PATCH] target/ppc: Check mask when setting
+ cap_ppc_safe_indirect_branch
+
+Check the character and character_mask field when setting
+cap_ppc_safe_indirect_branch based on the hypervisor response
+to KVM_PPC_GET_CPU_CHAR. Previously the mask field wasn't checked
+which was incorrect.
+
+Fixes: 8acc2ae5 (target/ppc/kvm: Add cap_ppc_safe_[cache/bounds_check/indirect_branch])
+
+Signed-off-by: Suraj Jitindar Singh <sjitindarsingh@gmail.com>
+Signed-off-by: David Gibson <david@gibson.dropbear.id.au>
+
+Forwarded: no (backport)
+Origin: upstream, https://git.qemu.org/?p=qemu.git;a=commit;h=cb931c2108a59db0b4a22f0c439ee7362c4f95ab
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1761372
+Last-Update: 2018-04-05
+---
+ target/ppc/kvm.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/target/ppc/kvm.c b/target/ppc/kvm.c
+index 9842b3b..2c183f6 100644
+--- a/target/ppc/kvm.c
++++ b/target/ppc/kvm.c
+@@ -2494,7 +2494,7 @@ static void kvmppc_get_cpu_characteristics(KVMState *s)
+         cap_ppc_safe_bounds_check = 1;
+     }
+     /* Parse and set cap_ppc_safe_indirect_branch */
+-    if (c.character & H_CPU_CHAR_BCCTRL_SERIALISED) {
++    if (c.character & c.character_mask & H_CPU_CHAR_BCCTRL_SERIALISED) {
+         cap_ppc_safe_indirect_branch = 2;
+     }
+ }
+-- 
+2.7.4
+

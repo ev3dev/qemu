@@ -1,0 +1,48 @@
+Description: special type for ppc64 meltdown/spectre defaults
+
+Upstresm 2.12 is not yet set in stone (almost but not full), and we ship 2.11
+with backports. SO we don't want to make a 2.12 machine type fully recommended
+yet.
+PPC was following x86 in providing a non default convenience type that has the
+spectre/meltdown flags toggled - in bug 1761372 we were requested to carry the
+same - but we agreed to do so as a 2.11 based type.
+
+Note I: x86 changes CPU types with -IBRS suffix, power chose to change machine
+types.
+
+Note II: this change can be squashed into ubuntu-machine-types.patch >=2.12
+where the base content will exist in the upstream source instead of
+patches on top.
+
+Forwarded: no (only needed for 2.11 downstream)
+Author: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1761372
+Last-Update: 2018-04-06
+
+--- a/hw/ppc/spapr.c
++++ b/hw/ppc/spapr.c
+@@ -4141,6 +4141,24 @@ DEFINE_SPAPR_MACHINE_NAMED(2_8, ubuntu_z
+ DEFINE_SPAPR_MACHINE_NAMED(2_10, ubuntu_artful, "artful", false);
+ DEFINE_SPAPR_MACHINE_NAMED(2_11, ubuntu_bionic, "bionic", true);
+ 
++/* Special 2.11 type for 1761372, since 2.12 is unreleased and 18.04 is 2.11 */
++static void spapr_machine_2_11_sxxm_instance_options(MachineState *machine)
++{
++    spapr_machine_2_11_instance_options(machine);
++}
++
++static void spapr_machine_2_11_sxxm_class_options(MachineClass *mc)
++{
++    sPAPRMachineClass *smc = SPAPR_MACHINE_CLASS(mc);
++
++    spapr_machine_2_11_class_options(mc);
++    smc->default_caps.caps[SPAPR_CAP_CFPC] = SPAPR_CAP_WORKAROUND;
++    smc->default_caps.caps[SPAPR_CAP_SBBC] = SPAPR_CAP_WORKAROUND;
++    smc->default_caps.caps[SPAPR_CAP_IBS] = SPAPR_CAP_FIXED_CCD;
++}
++DEFINE_SPAPR_MACHINE_NAMED(2_11_sxxm, ubuntu_bionic_sxxm, "bionic-sxxm", false);
++/* end Special 2.11 type for 1761372 */
++
+ static void spapr_machine_register_types(void)
+ {
+     type_register_static(&spapr_machine_info);

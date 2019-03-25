@@ -1,0 +1,88 @@
+Description: Add a -hpb Ubuntu specific machine type suffix
+
+This works already fine on commandline, but Libvirt and other stacks above
+have no exploitation yet. Using a machine type has the benefit of being already
+controllable by most upper layer software like Libvirt (type= in os tag) but
+even up to Openstack (nova.conf or per image metadata on hw_machine_type).
+
+This is based on a discussion:
+   https://bugs.launchpad.net/ubuntu/+source/qemu/+bug/1769053
+
+A similar change is in CentOS/RH (there the default is switched, without
+even a way to go back.
+But since this can cause issues e.g. when migrating
+across hosts with different characteristics, it is not set as the default
+in Ubuntu with this change.
+
+Further we want to avoid "machine type proliferation", so we certainly won't
+add a type for every feature. But using a huge guest is more common and
+otherwise not yet achievable.
+
+This can be dropped when:
+ - libvirt exposes phys-bits/host-phys-bits natively
+ - at least the important stacks above exploit that config
+As an alternative we might decide at some point to make it the default without
+a way to switch back in following releases, but for now we don't want to do so.
+
+Forwarded: not-needed
+Forward-info: downstream decision
+Author: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+Origin: http://mirrors.ibiblio.org/ovirt/pub/ovirt-4.0/src/qemu-kvm-ev/kvm-target-i386-Enable-host-phys-bits-on-RHEL.patch
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1776189
+Last-Update: 2018-06-06
+
+--- a/hw/i386/pc_piix.c
++++ b/hw/i386/pc_piix.c
+@@ -1181,6 +1181,16 @@ static void pc_bionic_machine_options(Ma
+ DEFINE_I440FX_MACHINE(bionic, "pc-i440fx-bionic", NULL,
+                       pc_bionic_machine_options);
+ 
++static void pc_bionic_hpb_machine_options(MachineClass *m)
++{
++    pc_i440fx_2_11_machine_options(m);
++    m->desc = "Ubuntu 18.04 PC (i440FX + PIIX, +host-phys-bits=true, 1996)";
++    m->alias = NULL;
++    SET_MACHINE_COMPAT(m, PC_HOST_PHYS_BITS_TRUE);
++}
++DEFINE_I440FX_MACHINE(bionic_hpb, "pc-i440fx-bionic-hpb", NULL,
++                      pc_bionic_hpb_machine_options);
++
+ /*
+  * Due to bug 1621042 we have to consider the broken old wily machine
+  * type as valid xenial type to ensure older VMs that got created prio
+--- a/hw/i386/pc_q35.c
++++ b/hw/i386/pc_q35.c
+@@ -432,3 +432,14 @@ static void pc_q35_bionic_machine_option
+ }
+ DEFINE_Q35_MACHINE(bionic, "pc-q35-bionic", NULL,
+                    pc_q35_bionic_machine_options);
++
++static void pc_q35_bionic_hpb_machine_options(MachineClass *m)
++{
++    pc_q35_2_11_machine_options(m);
++    m->desc = "Ubuntu 18.04 PC (Q35 + ICH9, +host-phys-bits=true, 2009)";
++    /* The ubuntu alias and default is on the i440fx type */
++    m->alias = NULL;
++    SET_MACHINE_COMPAT(m, PC_HOST_PHYS_BITS_TRUE);
++}
++DEFINE_Q35_MACHINE(bionic_hpb, "pc-q35-bionic-hpb", NULL,
++                   pc_q35_bionic_hpb_machine_options);
+--- a/include/hw/i386/pc.h
++++ b/include/hw/i386/pc.h
+@@ -1002,5 +1002,16 @@ bool e820_get_entry(int, uint32_t, uint6
+     } \
+     type_init(pc_machine_init_##suffix)
+ 
++/* This switches the host-phys-bits property default to true which will
++ * allow to run rather huge guests at the price of reduced migratability
++ * between rather different hosts.
++ */
++#define PC_HOST_PHYS_BITS_TRUE \
++        { \
++            .driver = TYPE_X86_CPU,\
++            .property = "host-phys-bits",\
++            .value = "on",\
++        },
++
+ extern void igd_passthrough_isa_bridge_create(PCIBus *bus, uint16_t gpu_dev_id);
+ #endif

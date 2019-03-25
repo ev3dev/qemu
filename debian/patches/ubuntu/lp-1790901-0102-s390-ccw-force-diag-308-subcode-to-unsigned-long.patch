@@ -1,0 +1,40 @@
+From 63d8b5ace31c1e1f3996fe4cd551d6d377594d5a Mon Sep 17 00:00:00 2001
+From: Cornelia Huck <cohuck@redhat.com>
+Date: Wed, 2 May 2018 14:52:21 +0200
+Subject: [PATCH] s390-ccw: force diag 308 subcode to unsigned long
+
+We currently pass an integer as the subcode parameter. However,
+the upper bits of the register containing the subcode need to
+be 0, which is not guaranteed unless we explicitly specify the
+subcode to be an unsigned long value.
+
+Fixes: d046c51dad3 ("pc-bios/s390-ccw: Get device address via diag 308/6")
+Cc: qemu-stable@nongnu.org
+Signed-off-by: Cornelia Huck <cohuck@redhat.com>
+Acked-by: Christian Borntraeger <borntraeger@de.ibm.com>
+Tested-by: Thomas Huth <thuth@redhat.com>
+Signed-off-by: Thomas Huth <thuth@redhat.com>
+---
+ pc-bios/s390-ccw/iplb.h | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/pc-bios/s390-ccw/iplb.h b/pc-bios/s390-ccw/iplb.h
+index 5357a36d51..ded20c834e 100644
+--- a/pc-bios/s390-ccw/iplb.h
++++ b/pc-bios/s390-ccw/iplb.h
+@@ -101,10 +101,11 @@ static inline bool manage_iplb(IplParameterBlock *iplb, bool store)
+ {
+     register unsigned long addr asm("0") = (unsigned long) iplb;
+     register unsigned long rc asm("1") = 0;
++    unsigned long subcode = store ? 6 : 5;
+ 
+     asm volatile ("diag %0,%2,0x308\n"
+                   : "+d" (addr), "+d" (rc)
+-                  : "d" (store ? 6 : 5)
++                  : "d" (subcode)
+                   : "memory", "cc");
+     return rc == 0x01;
+ }
+-- 
+2.17.1
+

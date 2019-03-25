@@ -1,0 +1,102 @@
+From 2a53535af471f4bee9d6cb5b363746b8d5ed21dd Mon Sep 17 00:00:00 2001
+From: Luke Shumaker <lukeshu@parabola.nu>
+Date: Thu, 28 Dec 2017 13:08:13 -0500
+Subject: [PATCH] linux-user: init_guest_space: Try to make ARM space+commpage
+ continuous
+
+At a fixed distance after the usable memory that init_guest_space maps, for
+32-bit ARM targets we also need to map a commpage.  The normal
+init_guest_space logic doesn't keep this in mind when searching for an
+address range.
+
+If !host_start, then try to find a big continuous segment where we can put
+both the usable memory and the commpage; we then munmap that segment and
+set current_start to that address; and let the normal code mmap the usable
+memory and the commpage separately.  That is: if we don't have hint of
+where to start looking for memory, come up with one that is better than
+NULL.  Depending on host_size and guest_start, there may or may not be a
+gap between the usable memory and the commpage, so this is slightly more
+restrictive than it needs to be; but it's only a hint, so that's OK.
+
+We only do that for !host start, because if host_start, then either:
+ - we got an address passed in with -B, in which case we don't want to
+   interfere with what the user said;
+ - or host_start is based off of the ELF image's loaddr.  The check "if
+   (host_start && real_start != current_start)" suggests that we really
+   want lowest available address that is >= loaddr.  I don't know why that
+   is, but I'm trusting that Paul Brook knew what he was doing when he
+   wrote the original version of that check in
+   c581deda322080e8beb88b2e468d4af54454e4b3 way back in 2010.
+
+Signed-off-by: Luke Shumaker <lukeshu@parabola.nu>
+Message-Id: <20171228180814.9749-11-lukeshu@lukeshu.com>
+Signed-off-by: Laurent Vivier <laurent@vivier.eu>
+
+Forwarded: no (backport)
+Author: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+Original-Author: Luke Shumaker <lukeshu@parabola.nu>
+Origin: upstream, https://git.qemu.org/?p=qemu.git;a=commit;h=2a53535af471f4bee9d6cb5b363746b8d5ed21dd
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1740219
+Last-Update: 2018-04-04
+---
+ linux-user/elfload.c | 49 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 49 insertions(+)
+
+--- a/linux-user/elfload.c
++++ b/linux-user/elfload.c
+@@ -1861,6 +1861,55 @@ unsigned long init_guest_space(unsigned
+ 
+     /* Otherwise, a non-zero size region of memory needs to be mapped
+      * and validated.  */
++
++#if defined(TARGET_ARM) && !defined(TARGET_AARCH64)
++    /* On 32-bit ARM, we need to map not just the usable memory, but
++     * also the commpage.  Try to find a suitable place by allocating
++     * a big chunk for all of it.  If host_start, then the naive
++     * strategy probably does good enough.
++     */
++    if (!host_start) {
++        unsigned long guest_full_size, host_full_size, real_start;
++
++        guest_full_size =
++            (0xffff0f00 & qemu_host_page_mask) + qemu_host_page_size;
++        host_full_size = guest_full_size - guest_start;
++        real_start = (unsigned long)
++            mmap(NULL, host_full_size, PROT_NONE, flags, -1, 0);
++        if (real_start == (unsigned long)-1) {
++            if (host_size < host_full_size - qemu_host_page_size) {
++                /* We failed to map a continous segment, but we're
++                 * allowed to have a gap between the usable memory and
++                 * the commpage where other things can be mapped.
++                 * This sparseness gives us more flexibility to find
++                 * an address range.
++                 */
++                goto naive;
++            }
++            return (unsigned long)-1;
++        }
++        munmap((void *)real_start, host_full_size);
++        if (real_start & ~qemu_host_page_mask) {
++            /* The same thing again, but with an extra qemu_host_page_size
++             * so that we can shift around alignment.
++             */
++            unsigned long real_size = host_full_size + qemu_host_page_size;
++            real_start = (unsigned long)
++                mmap(NULL, real_size, PROT_NONE, flags, -1, 0);
++            if (real_start == (unsigned long)-1) {
++                if (host_size < host_full_size - qemu_host_page_size) {
++                    goto naive;
++                }
++                return (unsigned long)-1;
++            }
++            munmap((void *)real_start, real_size);
++            real_start = HOST_PAGE_ALIGN(real_start);
++        }
++        current_start = real_start;
++    }
++ naive:
++#endif
++
+     while (1) {
+         unsigned long real_size = host_size;
+ 

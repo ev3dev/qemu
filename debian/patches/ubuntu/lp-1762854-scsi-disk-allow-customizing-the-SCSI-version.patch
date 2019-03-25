@@ -1,0 +1,151 @@
+From 2343be0d7ee8a6e02c2bf99d0243492085c8d399 Mon Sep 17 00:00:00 2001
+From: Paolo Bonzini <pbonzini@redhat.com>
+Date: Thu, 5 Apr 2018 18:09:51 +0200
+Subject: [PATCH] scsi-disk: allow customizing the SCSI version
+
+We would like to have different behavior for passthrough devices
+depending on the SCSI version they expose.  To prepare for that,
+allow the user of emulated devices to specify the desired SCSI
+level, and adjust the emulation according to the property value.
+The next patch will set the level for scsi-block and scsi-generic
+devices.
+
+Based on a patch by Daniel Henrique Barboza
+<danielhb@linux.vnet.ibm.com>.
+
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+
+Forwarded: no (backport)
+Author: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+Original-Author: Paolo Bonzini <pbonzini@redhat.com>
+Origin: upstream, https://github.com/qemu/qemu/commit/2343be0d7ee8a6e02c2bf99d0243492085c8d399
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1762854
+Last-Update: 2018-04-11
+---
+ hw/scsi/scsi-disk.c    | 29 ++++++++++++++++++++++++-----
+ hw/scsi/scsi-generic.c |  1 +
+ include/hw/scsi/scsi.h |  2 ++
+ 3 files changed, 27 insertions(+), 5 deletions(-)
+
+--- a/hw/scsi/scsi-disk.c
++++ b/hw/scsi/scsi-disk.c
+@@ -808,7 +808,7 @@ static int scsi_disk_emulate_inquiry(SCS
+      * block characteristics VPD page by default.  Not all of SPC-3
+      * is actually implemented, but we're good enough.
+      */
+-    outbuf[2] = 5;
++    outbuf[2] = s->qdev.default_scsi_version;
+     outbuf[3] = 2 | 0x10; /* Format 2, HiSup */
+ 
+     if (buflen > 36) {
+@@ -2176,7 +2176,11 @@ static int32_t scsi_disk_dma_command(SCS
+     case READ_12:
+     case READ_16:
+         DPRINTF("Read (sector %" PRId64 ", count %u)\n", r->req.cmd.lba, len);
+-        if (r->req.cmd.buf[1] & 0xe0) {
++        /* Protection information is not supported.  For SCSI versions 2 and
++         * older (as determined by snooping the guest's INQUIRY commands),
++         * there is no RD/WR/VRPROTECT, so skip this check in these versions.
++         */
++        if (s->qdev.scsi_version > 2 && (r->req.cmd.buf[1] & 0xe0)) {
+             goto illegal_request;
+         }
+         if (!check_lba_range(s, r->req.cmd.lba, len)) {
+@@ -2207,7 +2211,7 @@ static int32_t scsi_disk_dma_command(SCS
+          * As far as DMA is concerned, we can treat it the same as a write;
+          * scsi_block_do_sgio will send VERIFY commands.
+          */
+-        if (r->req.cmd.buf[1] & 0xe0) {
++        if (s->qdev.scsi_version > 2 && (r->req.cmd.buf[1] & 0xe0)) {
+             goto illegal_request;
+         }
+         if (!check_lba_range(s, r->req.cmd.lba, len)) {
+@@ -2253,6 +2257,8 @@ static void scsi_disk_reset(DeviceState
+     /* reset tray statuses */
+     s->tray_locked = 0;
+     s->tray_open = 0;
++
++    s->qdev.scsi_version = s->qdev.default_scsi_version;
+ }
+ 
+ static void scsi_disk_resize_cb(void *opaque)
+@@ -2801,6 +2807,8 @@ static bool scsi_block_is_passthrough(SC
+ static int32_t scsi_block_dma_command(SCSIRequest *req, uint8_t *buf)
+ {
+     SCSIBlockReq *r = (SCSIBlockReq *)req;
++    SCSIDiskState *s = DO_UPCAST(SCSIDiskState, qdev, req->dev);
++
+     r->cmd = req->cmd.buf[0];
+     switch (r->cmd >> 5) {
+     case 0:
+@@ -2826,8 +2834,11 @@ static int32_t scsi_block_dma_command(SC
+         abort();
+     }
+ 
+-    if (r->cdb1 & 0xe0) {
+-        /* Protection information is not supported.  */
++    /* Protection information is not supported.  For SCSI versions 2 and
++     * older (as determined by snooping the guest's INQUIRY commands),
++     * there is no RD/WR/VRPROTECT, so skip this check in these versions.
++     */
++    if (s->qdev.scsi_version > 2 && (req->cmd.buf[1] & 0xe0)) {
+         scsi_check_condition(&r->req, SENSE_CODE(INVALID_FIELD));
+         return 0;
+     }
+@@ -2939,6 +2950,8 @@ static Property scsi_hd_properties[] = {
+     DEFINE_PROP_UINT64("max_io_size", SCSIDiskState, max_io_size,
+                        DEFAULT_MAX_IO_SIZE),
+     DEFINE_PROP_UINT16("rotation_rate", SCSIDiskState, rotation_rate, 0),
++    DEFINE_PROP_INT32("scsi_version", SCSIDiskState, qdev.default_scsi_version,
++                      5),
+     DEFINE_BLOCK_CHS_PROPERTIES(SCSIDiskState, qdev.conf),
+     DEFINE_PROP_END_OF_LIST(),
+ };
+@@ -2984,6 +2997,8 @@ static Property scsi_cd_properties[] = {
+     DEFINE_PROP_UINT16("port_index", SCSIDiskState, port_index, 0),
+     DEFINE_PROP_UINT64("max_io_size", SCSIDiskState, max_io_size,
+                        DEFAULT_MAX_IO_SIZE),
++    DEFINE_PROP_INT32("scsi_version", SCSIDiskState, qdev.default_scsi_version,
++                      5),
+     DEFINE_PROP_END_OF_LIST(),
+ };
+ 
+@@ -3011,6 +3026,8 @@ static Property scsi_block_properties[]
+     DEFINE_BLOCK_ERROR_PROPERTIES(SCSIDiskState, qdev.conf),         \
+     DEFINE_PROP_DRIVE("drive", SCSIDiskState, qdev.conf.blk),
+     DEFINE_PROP_UINT16("rotation_rate", SCSIDiskState, rotation_rate, 0),
++    DEFINE_PROP_INT32("scsi_version", SCSIDiskState, qdev.default_scsi_version,
++                      5),
+     DEFINE_PROP_END_OF_LIST(),
+ };
+ 
+@@ -3051,6 +3068,8 @@ static Property scsi_disk_properties[] =
+                        DEFAULT_MAX_UNMAP_SIZE),
+     DEFINE_PROP_UINT64("max_io_size", SCSIDiskState, max_io_size,
+                        DEFAULT_MAX_IO_SIZE),
++    DEFINE_PROP_INT32("scsi_version", SCSIDiskState, qdev.default_scsi_version,
++                      5),
+     DEFINE_PROP_END_OF_LIST(),
+ };
+ 
+--- a/hw/scsi/scsi-generic.c
++++ b/hw/scsi/scsi-generic.c
+@@ -474,6 +474,7 @@ static void scsi_generic_reset(DeviceSta
+ {
+     SCSIDevice *s = SCSI_DEVICE(dev);
+ 
++    s->scsi_version = s->default_scsi_version;
+     scsi_device_purge_requests(s, SENSE_CODE(RESET));
+ }
+ 
+--- a/include/hw/scsi/scsi.h
++++ b/include/hw/scsi/scsi.h
+@@ -85,6 +85,8 @@ struct SCSIDevice
+     uint64_t max_lba;
+     uint64_t wwn;
+     uint64_t port_wwn;
++    int scsi_version;
++    int default_scsi_version;
+ };
+ 
+ extern const VMStateDescription vmstate_scsi_device;

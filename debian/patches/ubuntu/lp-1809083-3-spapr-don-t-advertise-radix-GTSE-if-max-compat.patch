@@ -1,0 +1,72 @@
+From 0550b1206a91d66051a21441a02c4ff126b531fe Mon Sep 17 00:00:00 2001
+From: Greg Kurz <groug@kaod.org>
+Date: Thu, 3 May 2018 23:16:59 +0200
+Subject: [PATCH 3/3] spapr: don't advertise radix GTSE if max-compat-cpu <
+ power9
+
+On a POWER9 host, if a guest runs in pre POWER9 compat mode, it necessarily
+uses the hash MMU mode. In this case, we shouldn't advertise radix GTSE in
+the ibm,arch-vec-5-platform-support DT property as the current code does.
+The first reason is that it doesn't make sense, and the second one is that
+causes the CAS-negotiated options subsection to be migrated. This breaks
+backward migration to QEMU 2.7 and older versions on POWER8 hosts:
+
+qemu-system-ppc64: error while loading state for instance 0x0 of device
+ 'spapr'
+qemu-system-ppc64: load of migration failed: No such file or directory
+
+This patch hence initialize CPUs a bit earlier so that we can check the
+requested compat mode, and don't set OV5_MMU_RADIX_GTSE for power8 and
+older.
+
+Signed-off-by: Greg Kurz <groug@kaod.org>
+Signed-off-by: David Gibson <david@gibson.dropbear.id.au>
+
+Author: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+Original-Author: Greg Kurz <groug@kaod.org>
+Origin: backport, https://git.qemu.org/?p=qemu.git;a=commit;h=0550b1206a91d66051a21441a02c4ff126b531fe
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1809083
+Last-Update: 2019-01-31
+
+---
+ hw/ppc/spapr.c | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+--- a/hw/ppc/spapr.c
++++ b/hw/ppc/spapr.c
+@@ -2343,6 +2343,7 @@ static void ppc_spapr_init(MachineState
+     long load_limit, fw_size;
+     char *filename;
+     Error *resize_hpt_err = NULL;
++    PowerPCCPU *first_ppc_cpu;
+ 
+     msi_nonbroken = true;
+ 
+@@ -2435,11 +2436,6 @@ static void ppc_spapr_init(MachineState
+     }
+ 
+     spapr_ovec_set(spapr->ov5, OV5_FORM1_AFFINITY);
+-    if (!kvm_enabled() || kvmppc_has_cap_mmu_radix()) {
+-        /* KVM and TCG always allow GTSE with radix... */
+-        spapr_ovec_set(spapr->ov5, OV5_MMU_RADIX_GTSE);
+-    }
+-    /* ... but not with hash (currently). */
+ 
+     /* advertise support for dedicated HP event source to guests */
+     if (spapr->use_hotplug_event_source) {
+@@ -2456,6 +2452,15 @@ static void ppc_spapr_init(MachineState
+ 
+     spapr_init_cpus(spapr);
+ 
++    first_ppc_cpu = POWERPC_CPU(first_cpu);
++    if ((!kvm_enabled() || kvmppc_has_cap_mmu_radix()) &&
++        ppc_check_compat(first_ppc_cpu, CPU_POWERPC_LOGICAL_3_00, 0,
++                         spapr->max_compat_pvr)) {
++        /* KVM and TCG always allow GTSE with radix... */
++        spapr_ovec_set(spapr->ov5, OV5_MMU_RADIX_GTSE);
++    }
++    /* ... but not with hash (currently). */
++
+     if (kvm_enabled()) {
+         /* Enable H_LOGICAL_CI_* so SLOF can talk to in-kernel devices */
+         kvmppc_enable_logical_ci_hcalls();

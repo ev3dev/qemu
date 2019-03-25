@@ -1,0 +1,67 @@
+From d36f7de82995a42b749c29c5b60ba31483995a42 Mon Sep 17 00:00:00 2001
+From: Cornelia Huck <cohuck@redhat.com>
+Date: Wed, 8 Aug 2018 16:19:49 +0200
+Subject: [PATCH] linux-headers: update
+
+Update to Linux upstream commit 2ad0d5269970
+("Merge git://git.kernel.org/pub/scm/linux/kernel/git/davem/net")
+
+Signed-off-by: Cornelia Huck <cohuck@redhat.com>
+---
+ include/standard-headers/asm-x86/kvm_para.h   |   1 +
+ include/standard-headers/drm/drm_fourcc.h     | 176 ++++++++++++++++++
+ include/standard-headers/linux/ethtool.h      |  11 +-
+ include/standard-headers/linux/pci_regs.h     |   4 +-
+ .../standard-headers/linux/virtio_config.h    |  16 +-
+ linux-headers/asm-generic/unistd.h            |   4 +-
+ linux-headers/asm-mips/unistd.h               |  18 +-
+ linux-headers/asm-powerpc/kvm.h               |   1 +
+ linux-headers/asm-powerpc/unistd.h            |   1 +
+ linux-headers/asm-s390/kvm.h                  |   5 +-
+ linux-headers/asm-s390/unistd_32.h            |   2 +
+ linux-headers/asm-s390/unistd_64.h            |   2 +
+ linux-headers/asm-x86/kvm.h                   |  37 ++++
+ linux-headers/linux/kvm.h                     |   5 +
+ linux-headers/linux/vhost.h                   |  18 ++
+ 15 files changed, 284 insertions(+), 17 deletions(-)
+
+Author: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+Original-Author: Cornelia Huck <cohuck@redhat.com>
+Origin: backport, https://git.qemu.org/?p=qemu.git;a=blobdiff;f=linux-headers/asm-s390/kvm.h;h=1ab9901911bf55e3aba55488bb20a184d85bbce5;hp=11def143015d572f208bbdf4aa4ecfa094c700a1;hb=d36f7de82995a42b749c29c5b60ba31483995a42;hpb=c61177881cbda50704207dd9fb4811659bbf913e
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1790457
+Last-Update: 2018-09-12
+
+Backport-Note: we reduced the original commit to just the
+linux-headers/asm-s390/kvm.h change as that is all we need for this bug as
+suggested by IBM when requesting the change.
+
+diff --git a/linux-headers/asm-s390/kvm.h b/linux-headers/asm-s390/kvm.h
+index 11def14301..1ab9901911 100644
+--- a/linux-headers/asm-s390/kvm.h
++++ b/linux-headers/asm-s390/kvm.h
+@@ -4,7 +4,7 @@
+ /*
+  * KVM s390 specific structures and definitions
+  *
+- * Copyright IBM Corp. 2008
++ * Copyright IBM Corp. 2008, 2018
+  *
+  *    Author(s): Carsten Otte <cotte@de.ibm.com>
+  *               Christian Borntraeger <borntraeger@de.ibm.com>
+@@ -225,6 +225,7 @@ struct kvm_guest_debug_arch {
+ #define KVM_SYNC_FPRS   (1UL << 8)
+ #define KVM_SYNC_GSCB   (1UL << 9)
+ #define KVM_SYNC_BPBC   (1UL << 10)
++#define KVM_SYNC_ETOKEN (1UL << 11)
+ /* length and alignment of the sdnx as a power of two */
+ #define SDNXC 8
+ #define SDNXL (1UL << SDNXC)
+@@ -258,6 +259,8 @@ struct kvm_sync_regs {
+ 		struct {
+ 			__u64 reserved1[2];
+ 			__u64 gscb[4];
++			__u64 etoken;
++			__u64 etoken_extension;
+ 		};
+ 	};
+ };

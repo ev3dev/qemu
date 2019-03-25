@@ -1,0 +1,37 @@
+Subject: fix the use of the pipe key over vnc
+Description: Upstream added a bunch of new scan codes to the en-us
+  keymap, including one that appears on European ( but not US )
+  keyboards, and also can produce a pipe in conjection with the
+  altgr key.  This created ambiguity in which scan code an X11
+  "bar" sym code a vnc client sends should be translated into.
+  Upstream has improved the logic to prefer the scan code that
+  matches the current modifier keys, but this was after the 2.11
+  version in Ubuntu.  For now, simply remove the scan codes for
+  this other key since it doesn't exist on US keyboards anyhow
+  ( and seems to me therefore, should never really be in the
+  en-us keymap ).
+  Details discussed upstream at:
+  http://lists.nongnu.org/archive/html/qemu-devel/2018-08/msg03203.html
+Author: Phillip Susi <psusi@ubuntu.com>
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/qemu/+bug/1787267
+Forwarded: not-needed
+Forward-info: solved in 2.12 otherwise
+Last-Update: 2018-08-23
+
+Index: b/pc-bios/keymaps/en-us
+===================================================================
+--- a/pc-bios/keymaps/en-us
++++ b/pc-bios/keymaps/en-us
+@@ -343,12 +343,6 @@ KP_Decimal 0x53 numlock
+ 
+ # evdev 85 (0x55): no evdev -> QKeyCode mapping (xkb keysym NoSymbol)
+ 
+-# evdev 86 (0x56), QKeyCode "less", number 0x56
+-less 0x56
+-greater 0x56 shift
+-bar 0x56 altgr
+-brokenbar 0x56 shift altgr
+-
+ # evdev 87 (0x57), QKeyCode "f11", number 0x57
+ F11 0x57
+ 

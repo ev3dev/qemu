@@ -1,0 +1,102 @@
+From 55fc7529a99be73ce09e64ef7c4edab0125fee06 Mon Sep 17 00:00:00 2001
+From: Greg Kurz <groug@kaod.org>
+Date: Tue, 27 Feb 2018 16:22:58 +0100
+Subject: [PATCH 9/9] spapr: register dummy ICPs later
+
+Some older machine types create more ICPs than needed. We hence
+need to register up to xics_max_server_number() dummy ICPs to
+accomodate the migration of these machine types.
+
+Recent VSMT rework changed xics_max_server_number() to return
+
+    DIV_ROUND_UP(max_cpus * spapr->vsmt, smp_threads)
+
+instead of
+
+    DIV_ROUND_UP(max_cpus * kvmppc_smt_threads(), smp_threads);
+
+The change is okay but it requires spapr->vsmt to be set, which
+isn't the case with the current code. This causes the formula to
+return zero and we don't create dummy ICPs. This breaks migration
+of older guests as reported here:
+
+    https://bugzilla.redhat.com/show_bug.cgi?id=1549087
+
+The dummy ICP workaround doesn't really have a dependency on XICS
+itself. But it does depend on proper VCPU id numbering and it must
+be applied before creating vCPUs (ie, creating real ICPs). So this
+patch moves the workaround to spapr_init_cpus(), which already
+assumes VSMT to be set.
+
+Fixes: 72194664c8a1 ("spapr: use spapr->vsmt to compute VCPU ids")
+Reported-by: Lukas Doktor <ldoktor@redhat.com>
+Signed-off-by: Greg Kurz <groug@kaod.org>
+Signed-off-by: David Gibson <david@gibson.dropbear.id.au>
+
+Forwarded: no (backport)
+Origin: upstream, https://git.qemu.org/?p=qemu.git;a=commit;h=72fdd4de
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1763468
+Last-Update: 2018-04-13
+---
+ hw/ppc/spapr.c | 24 ++++++++++++------------
+ 1 file changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/hw/ppc/spapr.c b/hw/ppc/spapr.c
+index 979f634..14cd2bf 100644
+--- a/hw/ppc/spapr.c
++++ b/hw/ppc/spapr.c
+@@ -184,7 +184,6 @@ static int xics_max_server_number(sPAPRMachineState *spapr)
+ static void xics_system_init(MachineState *machine, int nr_irqs, Error **errp)
+ {
+     sPAPRMachineState *spapr = SPAPR_MACHINE(machine);
+-    sPAPRMachineClass *smc = SPAPR_MACHINE_GET_CLASS(machine);
+ 
+     if (kvm_enabled()) {
+         if (machine_kernel_irqchip_allowed(machine) &&
+@@ -206,17 +205,6 @@ static void xics_system_init(MachineState *machine, int nr_irqs, Error **errp)
+             return;
+         }
+     }
+-
+-    if (smc->pre_2_10_has_unused_icps) {
+-        int i;
+-
+-        for (i = 0; i < xics_max_server_number(spapr); i++) {
+-            /* Dummy entries get deregistered when real ICPState objects
+-             * are registered during CPU core hotplug.
+-             */
+-            pre_2_10_vmstate_register_dummy_icp(i);
+-        }
+-    }
+ }
+ 
+ static int spapr_fixup_cpu_smt_dt(void *fdt, int offset, PowerPCCPU *cpu,
+@@ -2233,6 +2221,7 @@ static void spapr_init_cpus(sPAPRMachineState *spapr)
+ {
+     MachineState *machine = MACHINE(spapr);
+     MachineClass *mc = MACHINE_GET_CLASS(machine);
++    sPAPRMachineClass *smc = SPAPR_MACHINE_GET_CLASS(machine);
+     const char *type = spapr_get_cpu_core_type(machine->cpu_type);
+     const CPUArchIdList *possible_cpus;
+     int boot_cores_nr = smp_cpus / smp_threads;
+@@ -2263,6 +2252,17 @@ static void spapr_init_cpus(sPAPRMachineState *spapr)
+         boot_cores_nr = possible_cpus->len;
+     }
+ 
++    if (smc->pre_2_10_has_unused_icps) {
++        int i;
++
++        for (i = 0; i < xics_max_server_number(spapr); i++) {
++            /* Dummy entries get deregistered when real ICPState objects
++             * are registered during CPU core hotplug.
++             */
++            pre_2_10_vmstate_register_dummy_icp(i);
++        }
++    }
++
+     for (i = 0; i < possible_cpus->len; i++) {
+         int core_id = i * smp_threads;
+ 
+-- 
+2.7.4
+

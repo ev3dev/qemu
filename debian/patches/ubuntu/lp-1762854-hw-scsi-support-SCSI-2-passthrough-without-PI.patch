@@ -1,0 +1,122 @@
+From 29e560f00e2bc1b5731c8276031aaf192de55d9d Mon Sep 17 00:00:00 2001
+From: Daniel Henrique Barboza <danielhb@linux.vnet.ibm.com>
+Date: Tue, 27 Mar 2018 18:14:51 -0300
+Subject: [PATCH] hw/scsi: support SCSI-2 passthrough without PI
+
+QEMU SCSI code makes assumptions about how the PROTECT and BYTCHK
+works in the protocol, denying support for PI (Protection
+Information) in case the guest OS requests it. However, in SCSI versions 2
+and older, there is no PI concept in the protocol.
+
+This means that when dealing with such devices:
+
+- there is no PROTECT bit in byte 5 of the standard INQUIRY response. The
+whole byte is marked as "Reserved";
+
+- there is no RDPROTECT in byte 2 of READ. We have 'Logical Unit Number'
+in this field instead;
+
+- there is no VRPROTECT in byte 2 of VERIFY. We have 'Logical Unit Number'
+in this field instead. This also means that the BYTCHK bit in this case
+is not related to PI.
+
+Since QEMU does not consider these changes, a SCSI passthrough using
+a SCSI-2 device will not work. It will mistake these fields with
+PI information and return Illegal Request SCSI SENSE thinking
+that the driver is asking for PI support.
+
+This patch fixes it by adding a new attribute called 'scsi_version'
+that is read from the standard INQUIRY response of passthrough
+devices. This allows for a version verification before applying
+conditions related to PI that doesn't apply for older versions.
+
+Reported-by: Dac Nguyen <dacng@us.ibm.com>
+Signed-off-by: Daniel Henrique Barboza <danielhb@linux.vnet.ibm.com>
+Message-Id: <20180327211451.14647-1-danielhb@linux.vnet.ibm.com>
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+
+Forwarded: no (backport)
+Author: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+Original-Author: Daniel Henrique Barboza <danielhb@linux.vnet.ibm.com>
+Origin: upstream, https://github.com/qemu/qemu/commit/29e560f00e2bc1b5731c8276031aaf192de55d9d
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1762854
+Last-Update: 2018-04-11
+---
+ hw/scsi/scsi-disk.c    |  2 +-
+ hw/scsi/scsi-generic.c | 47 ++++++++++++++++++++++++++++++++++++-----------
+ 2 files changed, 37 insertions(+), 12 deletions(-)
+
+--- a/hw/scsi/scsi-disk.c
++++ b/hw/scsi/scsi-disk.c
+@@ -3027,7 +3027,7 @@ static Property scsi_block_properties[]
+     DEFINE_PROP_DRIVE("drive", SCSIDiskState, qdev.conf.blk),
+     DEFINE_PROP_UINT16("rotation_rate", SCSIDiskState, rotation_rate, 0),
+     DEFINE_PROP_INT32("scsi_version", SCSIDiskState, qdev.default_scsi_version,
+-                      5),
++                      -1),
+     DEFINE_PROP_END_OF_LIST(),
+ };
+ 
+--- a/hw/scsi/scsi-generic.c
++++ b/hw/scsi/scsi-generic.c
+@@ -194,17 +194,40 @@ static void scsi_read_complete(void * op
+             r->buf[3] |= 0x80;
+         }
+     }
+-    if (s->type == TYPE_DISK &&
+-        r->req.cmd.buf[0] == INQUIRY &&
+-        r->req.cmd.buf[2] == 0xb0) {
+-        uint32_t max_transfer =
+-            blk_get_max_transfer(s->conf.blk) / s->blocksize;
+-
+-        assert(max_transfer);
+-        stl_be_p(&r->buf[8], max_transfer);
+-        /* Also take care of the opt xfer len. */
+-        stl_be_p(&r->buf[12],
+-                 MIN_NON_ZERO(max_transfer, ldl_be_p(&r->buf[12])));
++    if (r->req.cmd.buf[0] == INQUIRY) {
++        /*
++         *  EVPD set to zero returns the standard INQUIRY data.
++         *
++         *  Check if scsi_version is unset (-1) to avoid re-defining it
++         *  each time an INQUIRY with standard data is received.
++         *  scsi_version is initialized with -1 in scsi_generic_reset
++         *  and scsi_disk_reset, making sure that we'll set the
++         *  scsi_version after a reset. If the version field of the
++         *  INQUIRY response somehow changes after a guest reboot,
++         *  we'll be able to keep track of it.
++         *
++         *  On SCSI-2 and older, first 3 bits of byte 2 is the
++         *  ANSI-approved version, while on later versions the
++         *  whole byte 2 contains the version. Check if we're dealing
++         *  with a newer version and, in that case, assign the
++         *  whole byte.
++         */
++        if (s->scsi_version == -1 && !(r->req.cmd.buf[1] & 0x01)) {
++            s->scsi_version = r->buf[2] & 0x07;
++            if (s->scsi_version > 2) {
++                s->scsi_version = r->buf[2];
++            }
++        }
++        if (s->type == TYPE_DISK && r->req.cmd.buf[2] == 0xb0) {
++            uint32_t max_transfer =
++                blk_get_max_transfer(s->conf.blk) / s->blocksize;
++
++            assert(max_transfer);
++            stl_be_p(&r->buf[8], max_transfer);
++            /* Also take care of the opt xfer len. */
++            stl_be_p(&r->buf[12],
++                     MIN_NON_ZERO(max_transfer, ldl_be_p(&r->buf[12])));
++        }
+     }
+     scsi_req_data(&r->req, len);
+     scsi_req_unref(&r->req);
+@@ -544,6 +567,8 @@ static void scsi_generic_realize(SCSIDev
+ 
+     DPRINTF("block size %d\n", s->blocksize);
+ 
++    /* Only used by scsi-block, but initialize it nevertheless to be clean.  */
++    s->default_scsi_version = -1;
+     scsi_generic_read_device_identification(s);
+ }
+ 

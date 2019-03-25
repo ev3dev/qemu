@@ -1,0 +1,287 @@
+From fc2564fb0f0c4dd6764d28aeea77b3e178b91e9c Mon Sep 17 00:00:00 2001
+From: Tony Krowiak <akrowiak@linux.ibm.com>
+Date: Wed, 10 Oct 2018 13:03:07 -0400
+Subject: [PATCH 5/6] s390x/vfio: ap: Introduce VFIO AP device
+
+Introduces a VFIO based AP device. The device is defined via
+the QEMU command line by specifying:
+
+    -device vfio-ap,sysfsdev=<path-to-mediated-matrix-device>
+
+There may be only one vfio-ap device configured for a guest.
+
+The mediated matrix device is created by the VFIO AP device
+driver by writing a UUID to a sysfs attribute file (see
+docs/vfio-ap.txt). The mediated matrix device will be named
+after the UUID. Symbolic links to the $uuid are created in
+many places, so the path to the mediated matrix device $uuid
+can be specified in any of the following ways:
+
+/sys/devices/vfio_ap/matrix/$uuid
+/sys/devices/vfio_ap/matrix/mdev_supported_types/vfio_ap-passthrough/devices/$uuid
+/sys/bus/mdev/devices/$uuid
+/sys/bus/mdev/drivers/vfio_mdev/$uuid
+
+When the vfio-ap device is realized, it acquires and opens the
+VFIO iommu group to which the mediated matrix device is
+bound. This causes a VFIO group notification event to be
+signaled. The vfio_ap device driver's group notification
+handler will get called at which time the device driver
+will configure the the AP devices to which the guest will
+be granted access.
+
+Signed-off-by: Tony Krowiak <akrowiak@linux.ibm.com>
+Tested-by: Pierre Morel <pmorel@linux.ibm.com>
+Acked-by: Halil Pasic <pasic@linux.ibm.com>
+Tested-by: Pierre Morel <pmorel@linux.ibm.com>
+Tested-by: Christian Borntraeger <borntraeger@de.ibm.com>
+Message-Id: <20181010170309.12045-6-akrowiak@linux.ibm.com>
+Reviewed-by: Thomas Huth <thuth@redhat.com>
+[CH: added missing g_free and device category]
+Signed-off-by: Cornelia Huck <cohuck@redhat.com>
+
+Origin: upstream, https://git.qemu.org/?p=qemu.git;a=commit;h=2fe2942cd6
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1787405
+Last-Update: 2018-11-15
+---
+ MAINTAINERS                       |   1 +
+ default-configs/s390x-softmmu.mak |   1 +
+ hw/vfio/Makefile.objs             |   1 +
+ hw/vfio/ap.c                      | 181 ++++++++++++++++++++++++++++++
+ include/hw/vfio/vfio-common.h     |   1 +
+ 5 files changed, 185 insertions(+)
+ create mode 100644 hw/vfio/ap.c
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index f6bc37131e..bb0376d168 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -1064,6 +1064,7 @@ F: hw/s390x/ap-device.c
+ F: hw/s390x/ap-bridge.c
+ F: include/hw/s390x/ap-device.h
+ F: include/hw/s390x/ap-bridge.h
++F: hw/vfio/ap.c
+ L: qemu-s390x@nongnu.org
+ 
+ vhost
+diff --git a/default-configs/s390x-softmmu.mak b/default-configs/s390x-softmmu.mak
+index 444bf16b80..8dace77eb7 100644
+--- a/default-configs/s390x-softmmu.mak
++++ b/default-configs/s390x-softmmu.mak
+@@ -8,3 +8,4 @@ CONFIG_S390_FLIC=y
+ CONFIG_S390_FLIC_KVM=$(CONFIG_KVM)
+ CONFIG_VFIO_CCW=$(CONFIG_LINUX)
+ CONFIG_WDT_DIAG288=y
++CONFIG_VFIO_AP=$(CONFIG_LINUX)
+diff --git a/hw/vfio/Makefile.objs b/hw/vfio/Makefile.objs
+index c3ab9097f1..7300860bee 100644
+--- a/hw/vfio/Makefile.objs
++++ b/hw/vfio/Makefile.objs
+@@ -6,4 +6,5 @@ obj-$(CONFIG_SOFTMMU) += platform.o
+ obj-$(CONFIG_VFIO_XGMAC) += calxeda-xgmac.o
+ obj-$(CONFIG_VFIO_AMD_XGBE) += amd-xgbe.o
+ obj-$(CONFIG_SOFTMMU) += spapr.o
++obj-$(CONFIG_VFIO_AP) += ap.o
+ endif
+diff --git a/hw/vfio/ap.c b/hw/vfio/ap.c
+new file mode 100644
+index 0000000000..3962bb74e5
+--- /dev/null
++++ b/hw/vfio/ap.c
+@@ -0,0 +1,181 @@
++/*
++ * VFIO based AP matrix device assignment
++ *
++ * Copyright 2018 IBM Corp.
++ * Author(s): Tony Krowiak <akrowiak@linux.ibm.com>
++ *            Halil Pasic <pasic@linux.ibm.com>
++ *
++ * This work is licensed under the terms of the GNU GPL, version 2 or (at
++ * your option) any later version. See the COPYING file in the top-level
++ * directory.
++ */
++
++#include <linux/vfio.h>
++#include <sys/ioctl.h>
++#include "qemu/osdep.h"
++#include "qapi/error.h"
++#include "hw/sysbus.h"
++#include "hw/vfio/vfio.h"
++#include "hw/vfio/vfio-common.h"
++#include "hw/s390x/ap-device.h"
++#include "qemu/error-report.h"
++#include "qemu/queue.h"
++#include "qemu/option.h"
++#include "qemu/config-file.h"
++#include "cpu.h"
++#include "kvm_s390x.h"
++#include "sysemu/sysemu.h"
++#include "hw/s390x/ap-bridge.h"
++#include "exec/address-spaces.h"
++
++#define VFIO_AP_DEVICE_TYPE      "vfio-ap"
++
++typedef struct VFIOAPDevice {
++    APDevice apdev;
++    VFIODevice vdev;
++} VFIOAPDevice;
++
++#define VFIO_AP_DEVICE(obj) \
++        OBJECT_CHECK(VFIOAPDevice, (obj), VFIO_AP_DEVICE_TYPE)
++
++static void vfio_ap_compute_needs_reset(VFIODevice *vdev)
++{
++    vdev->needs_reset = false;
++}
++
++/*
++ * We don't need vfio_hot_reset_multi and vfio_eoi operations for
++ * vfio-ap device now.
++ */
++struct VFIODeviceOps vfio_ap_ops = {
++    .vfio_compute_needs_reset = vfio_ap_compute_needs_reset,
++};
++
++static void vfio_ap_put_device(VFIOAPDevice *vapdev)
++{
++    g_free(vapdev->vdev.name);
++    vfio_put_base_device(&vapdev->vdev);
++}
++
++static VFIOGroup *vfio_ap_get_group(VFIOAPDevice *vapdev, Error **errp)
++{
++    GError *gerror = NULL;
++    char *symlink, *group_path;
++    int groupid;
++
++    symlink = g_strdup_printf("%s/iommu_group", vapdev->vdev.sysfsdev);
++    group_path = g_file_read_link(symlink, &gerror);
++    g_free(symlink);
++
++    if (!group_path) {
++        error_setg(errp, "%s: no iommu_group found for %s: %s",
++                   VFIO_AP_DEVICE_TYPE, vapdev->vdev.sysfsdev, gerror->message);
++        return NULL;
++    }
++
++    if (sscanf(basename(group_path), "%d", &groupid) != 1) {
++        error_setg(errp, "vfio: failed to read %s", group_path);
++        g_free(group_path);
++        return NULL;
++    }
++
++    g_free(group_path);
++
++    return vfio_get_group(groupid, &address_space_memory, errp);
++}
++
++static void vfio_ap_realize(DeviceState *dev, Error **errp)
++{
++    int ret;
++    char *mdevid;
++    Error *local_err = NULL;
++    VFIOGroup *vfio_group;
++    APDevice *apdev = AP_DEVICE(dev);
++    VFIOAPDevice *vapdev = VFIO_AP_DEVICE(apdev);
++
++    vfio_group = vfio_ap_get_group(vapdev, &local_err);
++    if (!vfio_group) {
++        goto out_err;
++    }
++
++    vapdev->vdev.ops = &vfio_ap_ops;
++    vapdev->vdev.type = VFIO_DEVICE_TYPE_AP;
++    mdevid = basename(vapdev->vdev.sysfsdev);
++    vapdev->vdev.name = g_strdup_printf("%s", mdevid);
++    vapdev->vdev.dev = dev;
++
++    ret = vfio_get_device(vfio_group, mdevid, &vapdev->vdev, &local_err);
++    if (ret) {
++        goto out_get_dev_err;
++    }
++
++    return;
++
++out_get_dev_err:
++    vfio_ap_put_device(vapdev);
++    vfio_put_group(vfio_group);
++out_err:
++    error_propagate(errp, local_err);
++}
++
++static void vfio_ap_unrealize(DeviceState *dev, Error **errp)
++{
++    APDevice *apdev = AP_DEVICE(dev);
++    VFIOAPDevice *vapdev = VFIO_AP_DEVICE(apdev);
++    VFIOGroup *group = vapdev->vdev.group;
++
++    vfio_ap_put_device(vapdev);
++    vfio_put_group(group);
++}
++
++static Property vfio_ap_properties[] = {
++    DEFINE_PROP_STRING("sysfsdev", VFIOAPDevice, vdev.sysfsdev),
++    DEFINE_PROP_END_OF_LIST(),
++};
++
++static void vfio_ap_reset(DeviceState *dev)
++{
++    int ret;
++    APDevice *apdev = AP_DEVICE(dev);
++    VFIOAPDevice *vapdev = VFIO_AP_DEVICE(apdev);
++
++    ret = ioctl(vapdev->vdev.fd, VFIO_DEVICE_RESET);
++    if (ret) {
++        error_report("%s: failed to reset %s device: %s", __func__,
++                     vapdev->vdev.name, strerror(ret));
++    }
++}
++
++static const VMStateDescription vfio_ap_vmstate = {
++    .name = VFIO_AP_DEVICE_TYPE,
++    .unmigratable = 1,
++};
++
++static void vfio_ap_class_init(ObjectClass *klass, void *data)
++{
++    DeviceClass *dc = DEVICE_CLASS(klass);
++
++    dc->props = vfio_ap_properties;
++    dc->vmsd = &vfio_ap_vmstate;
++    dc->desc = "VFIO-based AP device assignment";
++    set_bit(DEVICE_CATEGORY_MISC, dc->categories);
++    dc->realize = vfio_ap_realize;
++    dc->unrealize = vfio_ap_unrealize;
++    dc->hotpluggable = false;
++    dc->reset = vfio_ap_reset;
++    dc->bus_type = TYPE_AP_BUS;
++}
++
++static const TypeInfo vfio_ap_info = {
++    .name = VFIO_AP_DEVICE_TYPE,
++    .parent = AP_DEVICE_TYPE,
++    .instance_size = sizeof(VFIOAPDevice),
++    .class_init = vfio_ap_class_init,
++};
++
++static void vfio_ap_type_init(void)
++{
++    type_register_static(&vfio_ap_info);
++}
++
++type_init(vfio_ap_type_init)
+diff --git a/include/hw/vfio/vfio-common.h b/include/hw/vfio/vfio-common.h
+index f3a2ac9fee..f1f22d930a 100644
+--- a/include/hw/vfio/vfio-common.h
++++ b/include/hw/vfio/vfio-common.h
+@@ -46,6 +46,7 @@ enum {
+     VFIO_DEVICE_TYPE_PCI = 0,
+     VFIO_DEVICE_TYPE_PLATFORM = 1,
+     VFIO_DEVICE_TYPE_CCW = 2,
++    VFIO_DEVICE_TYPE_AP = 3,
+ };
+ 
+ typedef struct VFIOMmap {
+-- 
+2.17.1
+

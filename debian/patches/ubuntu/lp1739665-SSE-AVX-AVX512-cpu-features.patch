@@ -1,0 +1,73 @@
+From aff9e6e46a343e1404498be4edd03db1112f0950 Mon Sep 17 00:00:00 2001
+From: Yang Zhong <yang.zhong@intel.com>
+Date: Wed, 22 Nov 2017 15:27:56 +0800
+Subject: [PATCH] x86/cpu: Enable new SSE/AVX/AVX512 cpu features
+
+Intel IceLake cpu has added new cpu features,AVX512_VBMI2/GFNI/
+VAES/VPCLMULQDQ/AVX512_VNNI/AVX512_BITALG. Those new cpu features
+need expose to guest VM.
+
+The bit definition:
+CPUID.(EAX=7,ECX=0):ECX[bit 06] AVX512_VBMI2
+CPUID.(EAX=7,ECX=0):ECX[bit 08] GFNI
+CPUID.(EAX=7,ECX=0):ECX[bit 09] VAES
+CPUID.(EAX=7,ECX=0):ECX[bit 10] VPCLMULQDQ
+CPUID.(EAX=7,ECX=0):ECX[bit 11] AVX512_VNNI
+CPUID.(EAX=7,ECX=0):ECX[bit 12] AVX512_BITALG
+
+The release document ref below link:
+https://software.intel.com/sites/default/files/managed/c5/15/\
+architecture-instruction-set-extensions-programming-reference.pdf
+
+Signed-off-by: Yang Zhong <yang.zhong@intel.com>
+Message-Id: <1511335676-20797-1-git-send-email-yang.zhong@intel.com>
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+
+Forwarded: no (backport)
+Author: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+Original-Author: Yang Zhong <yang.zhong@intel.com>
+Origin: upstream, https://git.qemu.org/?p=qemu.git;a=commit;h=aff9e6e46a343e1404498be4edd03db1112f0950
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1739665
+Last-Update: 2018-04-04
+---
+ target/i386/cpu.c | 6 +++---
+ target/i386/cpu.h | 6 ++++++
+ 2 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/target/i386/cpu.c b/target/i386/cpu.c
+index 82603e3..325b52e 100644
+--- a/target/i386/cpu.c
++++ b/target/i386/cpu.c
+@@ -437,9 +437,9 @@ static FeatureWordInfo feature_word_info[FEATURE_WORDS] = {
+     [FEAT_7_0_ECX] = {
+         .feat_names = {
+             NULL, "avx512vbmi", "umip", "pku",
+-            "ospke", NULL, NULL, NULL,
+-            NULL, NULL, NULL, NULL,
+-            NULL, NULL, "avx512-vpopcntdq", NULL,
++            "ospke", NULL, "avx512vbmi2", NULL,
++            "gfni", "vaes", "vpclmulqdq", "avx512vnni",
++            "avx512bitalg", NULL, "avx512-vpopcntdq", NULL,
+             "la57", NULL, NULL, NULL,
+             NULL, NULL, "rdpid", NULL,
+             NULL, NULL, NULL, NULL,
+diff --git a/target/i386/cpu.h b/target/i386/cpu.h
+index b086b15..cdbf8b0 100644
+--- a/target/i386/cpu.h
++++ b/target/i386/cpu.h
+@@ -635,6 +635,12 @@ typedef uint32_t FeatureWordArray[FEATURE_WORDS];
+ #define CPUID_7_0_ECX_UMIP     (1U << 2)
+ #define CPUID_7_0_ECX_PKU      (1U << 3)
+ #define CPUID_7_0_ECX_OSPKE    (1U << 4)
++#define CPUID_7_0_ECX_VBMI2    (1U << 6) /* Additional VBMI Instrs */
++#define CPUID_7_0_ECX_GFNI     (1U << 8)
++#define CPUID_7_0_ECX_VAES     (1U << 9)
++#define CPUID_7_0_ECX_VPCLMULQDQ (1U << 10)
++#define CPUID_7_0_ECX_AVX512VNNI (1U << 11)
++#define CPUID_7_0_ECX_AVX512BITALG (1U << 12)
+ #define CPUID_7_0_ECX_AVX512_VPOPCNTDQ (1U << 14) /* POPCNT for vectors of DW/QW */
+ #define CPUID_7_0_ECX_LA57     (1U << 16)
+ #define CPUID_7_0_ECX_RDPID    (1U << 22)
+-- 
+2.7.4
+

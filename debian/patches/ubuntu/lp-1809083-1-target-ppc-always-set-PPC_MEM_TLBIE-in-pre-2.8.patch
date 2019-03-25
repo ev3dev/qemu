@@ -1,0 +1,54 @@
+From bce009645b9f1d59195518e35747c8ea30f985f7 Mon Sep 17 00:00:00 2001
+From: Greg Kurz <groug@kaod.org>
+Date: Thu, 3 May 2018 23:16:29 +0200
+Subject: [PATCH 1/3] target/ppc: always set PPC_MEM_TLBIE in pre 2.8 migration
+ hack
+
+The pseries-2.7 and older machine types require CPUPPCState::insns_flags
+to be strictly equal between source and destination. This checking is
+abusive and breaks migration of KVM guests when the host CPU models
+are different, even if they are compatible enough to allow the guest
+to run transparently. This buggy behaviour was fixed for pseries-2.8
+and we added some hacks to allow backward migration of older machine
+types. These hacks assume that the CPU belongs to the POWER8 family,
+which was true for most KVM based setup we cared about at the time.
+But now POWER9 systems are coming, and backward migration of pre 2.8
+guests running in POWER8 architected mode from a POWER9 host to a
+POWER8 host is broken:
+
+qemu-system-ppc64: error while loading state for instance 0x0 of device
+ 'cpu'
+qemu-system-ppc64: load of migration failed: Invalid argument
+
+This happens because POWER9 doesn't set PPC_MEM_TLBIE in insns_flags,
+while POWER8 does. Let's force PPC_MEM_TLBIE in the migration hack to
+fix the issue. This is an acceptable hack because these old machine
+types only support CPU models that do set PPC_MEM_TLBIE.
+
+Signed-off-by: Greg Kurz <groug@kaod.org>
+Signed-off-by: David Gibson <david@gibson.dropbear.id.au>
+
+Author: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+Original-Author: Greg Kurz <groug@kaod.org>
+Origin: backport, https://git.qemu.org/?p=qemu.git;a=commit;h=bce009645b9f1d59195518e35747c8ea30f985f7
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1809083
+Last-Update: 2019-01-31
+
+---
+ target/ppc/machine.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+--- a/target/ppc/machine.c
++++ b/target/ppc/machine.c
+@@ -192,6 +192,11 @@ static int cpu_pre_save(void *opaque)
+     if (cpu->pre_2_8_migration) {
+         cpu->mig_msr_mask = env->msr_mask;
+         cpu->mig_insns_flags = env->insns_flags & insns_compat_mask;
++        /* CPU models supported by old machines all have PPC_MEM_TLBIE,
++         * so we set it unconditionally to allow backward migration from
++         * a POWER9 host to a POWER8 host.
++         */
++        cpu->mig_insns_flags |= PPC_MEM_TLBIE;
+         cpu->mig_insns_flags2 = env->insns_flags2 & insns_compat_mask2;
+         cpu->mig_nb_BATs = env->nb_BATs;
+     }

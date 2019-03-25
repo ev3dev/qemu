@@ -1,0 +1,52 @@
+From 4f5b039d2bf9bb26b6e26a3dc65da36fe970cba9 Mon Sep 17 00:00:00 2001
+From: Suraj Jitindar Singh <sjitindarsingh@gmail.com>
+Date: Fri, 16 Feb 2018 13:33:27 +1100
+Subject: [PATCH] ppc/spapr-caps: Disallow setting workaround for spapr-cap-ibs
+
+The spapr-cap cap-ibs can only have values broken or fixed as there is
+no explicit workaround required. Currently setting the value workaround
+for this cap will hit an assert if the guest makes the hcall
+h_get_cpu_characteristics.
+
+Report an error when attempting to apply the setting with a more helpful
+error message.
+
+Reported-by: Satheesh Rajendran <sathnaga@linux.vnet.ibm.com>
+Signed-off-by: Suraj Jitindar Singh <sjitindarsingh@gmail.com>
+Signed-off-by: David Gibson <david@gibson.dropbear.id.au>
+
+Forwarded: no (backport)
+Origin: upstream, https://git.qemu.org/?p=qemu.git;a=commit;h=4f5b039d2bf9bb26b6e26a3dc65da36fe970cba9
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1761372
+Last-Update: 2018-04-05
+---
+ hw/ppc/spapr_caps.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/hw/ppc/spapr_caps.c b/hw/ppc/spapr_caps.c
+index e69d308..99a4b71 100644
+--- a/hw/ppc/spapr_caps.c
++++ b/hw/ppc/spapr_caps.c
+@@ -205,7 +205,9 @@ static void cap_safe_bounds_check_apply(sPAPRMachineState *spapr, uint8_t val,
+ static void cap_safe_indirect_branch_apply(sPAPRMachineState *spapr,
+                                            uint8_t val, Error **errp)
+ {
+-    if (tcg_enabled() && val) {
++    if (val == SPAPR_CAP_WORKAROUND) { /* Can only be Broken or Fixed */
++        error_setg(errp, "Requested safe indirect branch capability level \"workaround\" not valid, try cap-ibs=fixed");
++    } else if (tcg_enabled() && val) {
+         /* TODO - for now only allow broken for TCG */
+         error_setg(errp, "Requested safe indirect branch capability level not supported by tcg, try a different value for cap-ibs");
+     } else if (kvm_enabled() && (val > kvmppc_get_cap_safe_indirect_branch())) {
+@@ -263,7 +265,7 @@ sPAPRCapabilityInfo capability_table[SPAPR_CAP_NUM] = {
+     },
+     [SPAPR_CAP_IBS] = {
+         .name = "ibs",
+-        .description = "Indirect Branch Serialisation" VALUE_DESC_TRISTATE,
++        .description = "Indirect Branch Serialisation (broken, fixed)",
+         .index = SPAPR_CAP_IBS,
+         .get = spapr_cap_get_tristate,
+         .set = spapr_cap_set_tristate,
+-- 
+2.7.4
+
