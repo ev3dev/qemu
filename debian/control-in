@@ -2,7 +2,7 @@ Source: qemu
 Section: otherosfs
 Priority: optional
 Maintainer: David Lechner <david@lechnology.com>
-Build-Depends: debhelper (>= 9),
+Build-Depends: debhelper (>= 9), dh-systemd,
 # In comments below we also specify (system-specific) arguments
 # to qemu's configure script, -- optional features which depend
 # on build-dependencies.
