@@ -1,12 +1,7 @@
 Source: qemu
 Section: otherosfs
 Priority: optional
-:debian:Maintainer: Debian QEMU Team <pkg-qemu-devel@lists.alioth.debian.org>
-:ubuntu:Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
-:ubuntu:XSBC-Original-Maintainer: Debian QEMU Team <pkg-qemu-devel@lists.alioth.debian.org>
-Uploaders: Aurelien Jarno <aurel32@debian.org>,
-	Riku Voipio <riku.voipio@iki.fi>,
-	Michael Tokarev <mjt@tls.msk.ru>
+Maintainer: David Lechner <david@lechnology.com>
 Build-Depends: debhelper (>= 9),
 # In comments below we also specify (system-specific) arguments
 # to qemu's configure script, -- optional features which depend
@@ -113,12 +108,8 @@ Build-Depends: debhelper (>= 9),
 Build-Conflicts: oss4-dev
 Standards-Version: 3.9.8
 Homepage: http://www.qemu.org/
-:debian:Vcs-Browser: https://anonscm.debian.org/gitweb/?p=pkg-qemu/qemu.git
-:ubuntu:Vcs-Browser: https://anonscm.debian.org/gitweb/?p=pkg-qemu/qemu.git;a=shortlog;h=refs/heads/ubuntu-utopic
-:ubuntu:XS-Debian-Vcs-Browser: https://anonscm.debian.org/gitweb/?p=pkg-qemu/qemu.git
-:debian:Vcs-Git: git://anonscm.debian.org/pkg-qemu/qemu.git
-:ubuntu:Vcs-Git: git://anonscm.debian.org/pkg-qemu/qemu.git -b ubuntu-bionic-2.11
-:ubuntu:XS-Debian-Vcs-Git: git://anonscm.debian.org/pkg-qemu/qemu.git
+Vcs-Browser: https://github.com/ev3dev/qemu
+Vcs-Git: https://github.com/ev3dev/qemu.git
 
 Package: qemu
 Architecture: amd64 arm arm64 armel armhf hppa i386 ia64 kfreebsd-amd64 kfreebsd-i386 mips mipsel mips64 mips64el powerpc powerpcspe ppc64 ppc64el s390x sparc sparc64 x32
