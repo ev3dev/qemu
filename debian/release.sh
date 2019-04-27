@@ -3,7 +3,7 @@
 set -e
 
 source=$(dpkg-parsechangelog -S Source)
-version=$(dpkg-parsechangelog -S Version)
+version=$(dpkg-parsechangelog -S Version | sed s/^1://)
 
 debuild -S -d
 debuild -d -- clean
