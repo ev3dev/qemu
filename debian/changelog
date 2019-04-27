@@ -1,3 +1,11 @@
+qemu (1:2.11+dfsg-1ubuntu7.12ev3dev1) xenial; urgency=medium
+
+  * ev3dev takeover for backport to xenial
+  * debian: fix build depends for libftd-dev
+  * debian: add build-depends on dh-systemd
+
+ -- David Lechner <david@lechnology.com>  Sat, 27 Apr 2019 15:36:25 -0500
+
 qemu (1:2.11+dfsg-1ubuntu7.12) bionic-security; urgency=medium
 
   [ Marc Deslauriers ]
