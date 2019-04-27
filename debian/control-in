@@ -33,7 +33,7 @@ Build-Depends: debhelper (>= 9),
 # --enable-curl
  libcurl4-gnutls-dev,
 # --enable-fdt
- libfdt-dev,
+ libfdt-dev (>= 1.4.2),
 # --enable-gnutls
  gnutls-dev,
 # gtk ui is almost the same as sdl but adds bloat
